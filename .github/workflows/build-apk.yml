@@ -12,58 +12,37 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout the repo
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Set up JDK 17
-      - name: Set up JDK 17
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
-      # 3. Set up Android SDK
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      # 4. Set up Gradle (handles wrapper generation + caching)
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # 5. Decode the debug keystore
       - name: Decode debug keystore
-        run: |
-          base64 -d debug.keystore.base64 > debug.keystore
+        run: base64 -d debug.keystore.base64 > debug.keystore
 
-      # 6. Create .env file with Gemini API key
       - name: Create .env file
-        run: |
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+        run: echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
 
-      # 7. Generate Gradle wrapper if missing
-      - name: Generate Gradle wrapper if missing
+      - name: Generate Gradle wrapper
         run: |
           if [ ! -f gradlew ]; then
-            # Check if gradle-wrapper.properties exists to get the version
-            if [ -f gradle/wrapper/gradle-wrapper.properties ]; then
-              GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed 's/.*gradle-//;s/-.*//')
-              echo "Detected Gradle version: $GRADLE_VERSION"
-            else
-              GRADLE_VERSION="8.11.1"
-              echo "No wrapper properties found, using default: $GRADLE_VERSION"
-            fi
-            gradle wrapper --gradle-version "$GRADLE_VERSION"
-            chmod +x gradlew
-          else
-            chmod +x gradlew
+            gradle wrapper --gradle-version 9.3.1
           fi
+          chmod +x gradlew
 
-      # 8. Build the debug APK
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-      # 9. Upload the APK artifact
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
