@@ -37,6 +37,10 @@ fun LeafletMapView(
         modifier = modifier,
         factory = { context ->
             WebView(context).apply {
+                layoutParams = android.view.ViewGroup.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                )
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
@@ -44,18 +48,18 @@ fun LeafletMapView(
                         
                         // Push initial states upon loading
                         val routesJson = JsonHelper.routesToJson(routes)
-                        evaluateJavascript("drawSavedRoutes('$routesJson')", null)
+                        evaluateJavascript("drawSavedRoutes($routesJson)", null)
                         
                         evaluateJavascript("setDrawingMode($isDrawingMode)", null)
                         
                         if (activeCoordinates.isNotEmpty()) {
                             val activeJson = JsonHelper.pointsToJson(activeCoordinates)
-                            evaluateJavascript("updateCurrentRide('$activeJson')", null)
+                            evaluateJavascript("updateCurrentRide($activeJson)", null)
                         }
                         
                         if (drawingPoints.isNotEmpty()) {
                             val drawingJson = JsonHelper.pointsToJson(drawingPoints)
-                            evaluateJavascript("updateDrawingPoints('$drawingJson')", null)
+                            evaluateJavascript("updateDrawingPoints($drawingJson)", null)
                         }
                         
                         userLocation?.let {
@@ -75,6 +79,10 @@ fun LeafletMapView(
                     javaScriptEnabled = true
                     domStorageEnabled = true
                     allowFileAccess = true
+                    allowContentAccess = true
+                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    allowFileAccessFromFileURLs = true
+                    allowUniversalAccessFromFileURLs = true
                 }
 
                 addJavascriptInterface(object {
@@ -114,21 +122,21 @@ fun LeafletMapView(
     LaunchedEffect(routes, isPageFinished) {
         if (isPageFinished && webViewInstance != null) {
             val json = JsonHelper.routesToJson(routes)
-            webViewInstance?.evaluateJavascript("drawSavedRoutes('$json')", null)
+            webViewInstance?.evaluateJavascript("drawSavedRoutes($json)", null)
         }
     }
 
     LaunchedEffect(activeCoordinates, isPageFinished) {
         if (isPageFinished && webViewInstance != null) {
             val json = JsonHelper.pointsToJson(activeCoordinates)
-            webViewInstance?.evaluateJavascript("updateCurrentRide('$json')", null)
+            webViewInstance?.evaluateJavascript("updateCurrentRide($json)", null)
         }
     }
 
     LaunchedEffect(drawingPoints, isPageFinished) {
         if (isPageFinished && webViewInstance != null) {
             val json = JsonHelper.pointsToJson(drawingPoints)
-            webViewInstance?.evaluateJavascript("updateDrawingPoints('$json')", null)
+            webViewInstance?.evaluateJavascript("updateDrawingPoints($json)", null)
         }
     }
 

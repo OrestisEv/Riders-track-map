@@ -331,6 +331,23 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
         return builder.toString()
     }
 
+    fun exportRouteToCsvWithTimestamps(route: Route): String {
+        val sfd = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
+        val builder = java.lang.StringBuilder()
+        builder.append("Latitude,Longitude,Timestamp\n")
+        route.coordinates.forEachIndexed { index, point ->
+            // Assume 5 seconds interval per coordinate point for simulated timestamp
+            val pointTime = route.date + (index * 5000L)
+            val formattedTime = sfd.format(Date(pointTime))
+            builder.append("${point.lat},${point.lng},\"$formattedTime\"\n")
+        }
+        return builder.toString()
+    }
+
+    fun exportAllRoutesToJson(routes: List<Route>): String {
+        return JsonHelper.routesToJson(routes)
+    }
+
     // --- Distance Helpers ---
 
     private fun calculateDistance(p1: RoutePoint, p2: RoutePoint): Double {

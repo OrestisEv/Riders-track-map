@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body, html, #map {
             width: 100%;
@@ -34,7 +34,7 @@
             box-shadow: 0 0 10px rgba(251, 146, 60, 0.9);
         }
     </style>
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
     <div id="map"></div>
@@ -119,10 +119,10 @@
         }
 
         // Interface: Update current drawing path coordinates
-        function updateDrawingPoints(pointsJson) {
+        function updateDrawingPoints(pointsData) {
             clearDrawing();
-            var points = JSON.parse(pointsJson); // List of {lat, lng}
-            if (points.length === 0) return;
+            var points = typeof pointsData === 'string' ? JSON.parse(pointsData) : pointsData;
+            if (!points || points.length === 0) return;
 
             var latlngs = points.map(p => [p.lat, p.lng]);
 
@@ -160,14 +160,15 @@
         }
 
         // Interface: Draw/Update Saved Lifetime Routes
-        function drawSavedRoutes(routesJson) {
+        function drawSavedRoutes(routesData) {
             // Remove previous saved polylines
             Object.keys(savedPolylines).forEach(function(key) {
                 map.removeLayer(savedPolylines[key]);
             });
             savedPolylines = {};
 
-            var routes = JSON.parse(routesJson);
+            var routes = typeof routesData === 'string' ? JSON.parse(routesData) : routesData;
+            if (!routes) return;
             routes.forEach(function(route) {
                 var latlngs = route.coordinates.map(p => [p.lat, p.lng]);
                 if (latlngs.length < 2) return;
@@ -202,14 +203,14 @@
         }
 
         // Interface: Update Live Active Ride Path
-        function updateCurrentRide(pointsJson) {
+        function updateCurrentRide(pointsData) {
             if (currentRidePolyline) {
                 map.removeLayer(currentRidePolyline);
                 currentRidePolyline = null;
             }
 
-            var points = JSON.parse(pointsJson);
-            if (points.length < 2) return;
+            var points = typeof pointsData === 'string' ? JSON.parse(pointsData) : pointsData;
+            if (!points || points.length < 2) return;
 
             var latlngs = points.map(p => [p.lat, p.lng]);
 
@@ -230,9 +231,9 @@
         }
 
         // Interface: Fit Bounds to Selected Route
-        function focusRoute(pointsJson) {
-            var points = JSON.parse(pointsJson);
-            if (points.length === 0) return;
+        function focusRoute(pointsData) {
+            var points = typeof pointsData === 'string' ? JSON.parse(pointsData) : pointsData;
+            if (!points || points.length === 0) return;
             var latlngs = points.map(p => [p.lat, p.lng]);
             if (latlngs.length === 1) {
                 map.setView(latlngs[0], 16);

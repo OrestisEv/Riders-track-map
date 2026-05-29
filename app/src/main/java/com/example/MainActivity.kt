@@ -17,6 +17,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -191,6 +193,43 @@ fun RoadTrackerApp(
                 Manifest.permission.ACCESS_COARSE_LOCATION
             )
         )
+    }
+
+    // Filtering states
+    var dateFilter by remember { mutableStateOf("All Date") }
+    var lengthFilter by remember { mutableStateOf("All Size") }
+
+    val filteredRoutes = remember(routes, dateFilter, lengthFilter) {
+        routes.filter { route ->
+            val matchesDate = when (dateFilter) {
+                "Today" -> {
+                    val cal = java.util.Calendar.getInstance()
+                    cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                    cal.set(java.util.Calendar.MINUTE, 0)
+                    cal.set(java.util.Calendar.SECOND, 0)
+                    cal.set(java.util.Calendar.MILLISECOND, 0)
+                    route.date >= cal.timeInMillis
+                }
+                "Last 7 Days" -> {
+                    val threshold = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
+                    route.date >= threshold
+                }
+                "Last 30 Days" -> {
+                    val threshold = System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L
+                    route.date >= threshold
+                }
+                else -> true
+            }
+
+            val matchesLength = when (lengthFilter) {
+                "Short (< 5km)" -> route.distance < 5.0
+                "Med (5-20km)" -> route.distance in 5.0..20.0
+                "Long (> 20km)" -> route.distance > 20.0
+                else -> true
+            }
+
+            matchesDate && matchesLength
+        }
     }
 
     // Dialog state controllers
@@ -662,7 +701,7 @@ fun RoadTrackerApp(
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(340.dp),
+                            .height(420.dp),
                         shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
                         color = GlassyOverlay,
                         tonalElevation = 8.dp,
@@ -684,8 +723,8 @@ fun RoadTrackerApp(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
                                         imageVector = Icons.Default.TwoWheeler,
-                                        contentDescription = "Motorbike routes",
-                                        tint = ElectricCyan
+                                        tint = ElectricCyan,
+                                        contentDescription = "Motorbike routes"
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text(
@@ -699,7 +738,8 @@ fun RoadTrackerApp(
                                 
                                 Row(
                                     modifier = Modifier.wrapContentSize(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     // Custom Import GPX Route Button
                                     TextButton(
@@ -709,6 +749,27 @@ fun RoadTrackerApp(
                                         Icon(Icons.Default.UploadFile, contentDescription = "Import Tracker GPX", modifier = Modifier.size(15.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
                                         Text("IMPORT GPX", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    // Export All Data Button
+                                    TextButton(
+                                        onClick = {
+                                            if (routes.isNotEmpty()) {
+                                                val intent = Intent().apply {
+                                                    action = Intent.ACTION_SEND
+                                                    putExtra(Intent.EXTRA_TEXT, viewModel.exportAllRoutesToJson(routes))
+                                                    type = "application/json"
+                                                }
+                                                context.startActivity(Intent.createChooser(intent, "Share All Routes JSON"))
+                                            } else {
+                                                Toast.makeText(context, "No saved data to export", Toast.LENGTH_SHORT).show()
+                                            }
+                                        },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = ElectricCyan)
+                                    ) {
+                                        Icon(Icons.Default.Share, contentDescription = "Export All Journeys", modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("EXPORT ALL", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
 
                                     // Close
@@ -756,124 +817,237 @@ fun RoadTrackerApp(
                                     }
                                 }
                             } else {
-                                // History journal paths column list
-                                LazyColumn(
+                                // Dynamic premium filters
+                                Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .weight(1f),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    contentPadding = PaddingValues(bottom = 12.dp)
+                                        .padding(bottom = 10.dp)
                                 ) {
-                                    items(routes) { route ->
-                                        val isCurrentSelected = selectedRoute?.id == route.id
-                                        
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(if (isCurrentSelected) SlateCockpitSurface else DeepDarkBackground)
-                                                .border(
-                                                    1.5.dp,
-                                                    if (isCurrentSelected) ElectricCyan else GeometricBorder,
-                                                    RoundedCornerShape(14.dp)
+                                    // Row 1: Date Presets scrollable chips
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 6.dp)
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        listOf("All Date", "Today", "Last 7 Days", "Last 30 Days").forEach { option ->
+                                            val isSelected = dateFilter == option
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isSelected) ElectricCyan else SlateCockpitSurface)
+                                                    .border(1.dp, if (isSelected) ElectricCyan else GeometricBorder, RoundedCornerShape(8.dp))
+                                                    .clickable { dateFilter = option }
+                                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = option,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSelected) DeepDarkBackground else Color.White
                                                 )
-                                                .clickable {
-                                                    viewModel.selectRoute(route)
-                                                }
-                                                .padding(10.dp)
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
+                                            }
+                                        }
+                                    }
+
+                                    // Row 2: Length boundary chips
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 4.dp)
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        listOf("All Size", "Short (< 5km)", "Med (5-20km)", "Long (> 20km)").forEach { option ->
+                                            val isSelected = lengthFilter == option
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isSelected) NeonPink else SlateCockpitSurface)
+                                                    .border(1.dp, if (isSelected) NeonPink else GeometricBorder, RoundedCornerShape(8.dp))
+                                                    .clickable { lengthFilter = option }
+                                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                                            ) {
+                                                Text(
+                                                    text = option,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = if (isSelected) DeepDarkBackground else Color.White
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (filteredRoutes.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(
+                                                text = "No routes match active filters.",
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = TextMuted
+                                            )
+                                            Spacer(modifier = Modifier.height(6.dp))
+                                            TextButton(
+                                                onClick = {
+                                                    dateFilter = "All Date"
+                                                    lengthFilter = "All Size"
+                                                },
+                                                colors = ButtonDefaults.textButtonColors(contentColor = ElectricCyan)
+                                            ) {
+                                                Text("Reset Filters", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    // History journal paths column list
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                        contentPadding = PaddingValues(bottom = 12.dp)
+                                    ) {
+                                        items(filteredRoutes) { route ->
+                                            val isCurrentSelected = selectedRoute?.id == route.id
+                                            
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(14.dp))
+                                                    .background(if (isCurrentSelected) SlateCockpitSurface else DeepDarkBackground)
+                                                    .border(
+                                                        1.5.dp,
+                                                        if (isCurrentSelected) ElectricCyan else GeometricBorder,
+                                                        RoundedCornerShape(14.dp)
+                                                    )
+                                                    .clickable {
+                                                        viewModel.selectRoute(route)
+                                                    }
+                                                    .padding(10.dp)
                                             ) {
                                                 Row(
-                                                    modifier = Modifier.weight(1f),
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
                                                     verticalAlignment = Alignment.CenterVertically
                                                 ) {
-                                                    // Route mode colored visual tag indicators
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(4.dp, 36.dp)
-                                                            .clip(RoundedCornerShape(2.dp))
-                                                            .background(
-                                                                if (route.mode == "gps") ElectricCyan
-                                                                else NeonPink
+                                                    Row(
+                                                        modifier = Modifier.weight(1f),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        // Route mode colored visual tag indicators
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(4.dp, 36.dp)
+                                                                .clip(RoundedCornerShape(2.dp))
+                                                                .background(
+                                                                    if (route.mode == "gps") ElectricCyan
+                                                                    else NeonPink
+                                                                )
+                                                        )
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        
+                                                        Column(modifier = Modifier.fillMaxWidth()) {
+                                                            Text(
+                                                                text = route.name,
+                                                                fontSize = 13.sp,
+                                                                color = Color.White,
+                                                                fontWeight = FontWeight.Bold,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis
                                                             )
-                                                    )
-                                                    Spacer(modifier = Modifier.width(10.dp))
-                                                    
-                                                    Column(modifier = Modifier.fillMaxWidth()) {
-                                                        Text(
-                                                            text = route.name,
-                                                            fontSize = 13.sp,
-                                                            color = Color.White,
-                                                            fontWeight = FontWeight.Bold,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis
-                                                        )
-                                                        Spacer(modifier = Modifier.height(2.dp))
-                                                        Text(
-                                                            text = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(route.date)) + 
-                                                                   " • " + if(route.mode == "gps") "🏍️ GPS" else "🗺️ Draw",
-                                                            fontSize = 11.sp,
-                                                            color = TextMuted
-                                                        )
-                                                    }
-                                                }
-
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    // Segment distance indicator badge
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .clip(RoundedCornerShape(8.dp))
-                                                            .background(DeepDarkBackground)
-                                                            .border(1.dp, GeometricBorder, RoundedCornerShape(8.dp))
-                                                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                                                    ) {
-                                                        Text(
-                                                            text = String.format(Locale.US, "%.2f km", route.distance),
-                                                            fontSize = 12.sp,
-                                                            fontWeight = FontWeight.Bold,
-                                                            fontFamily = FontFamily.Monospace,
-                                                            color = if (route.mode == "gps") ElectricCyan else NeonPink
-                                                        )
-                                                    }
-                                                    Spacer(modifier = Modifier.width(6.dp))
-
-                                                    // Native GPX exporter triggers
-                                                    IconButton(
-                                                        onClick = {
-                                                            val intent = Intent().apply {
-                                                                action = Intent.ACTION_SEND
-                                                                putExtra(Intent.EXTRA_TEXT, viewModel.exportRouteToGpx(route))
-                                                                type = "text/xml"
-                                                            }
-                                                            context.startActivity(Intent.createChooser(intent, "Share Journey GPX"))
-                                                        },
-                                                        modifier = Modifier.size(28.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.Share,
-                                                            contentDescription = "Export GPX data",
-                                                            tint = TextMuted,
-                                                            modifier = Modifier.size(16.dp)
-                                                        )
+                                                            Spacer(modifier = Modifier.height(2.dp))
+                                                            Text(
+                                                                text = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(route.date)) + 
+                                                                       " • " + if(route.mode == "gps") "🏍️ GPS" else "🗺️ Draw",
+                                                                fontSize = 11.sp,
+                                                                color = TextMuted
+                                                            )
+                                                        }
                                                     }
 
-                                                    // Trash routing cleaner
-                                                    IconButton(
-                                                        onClick = {
-                                                            pendingRouteForDeletion = route
-                                                        },
-                                                        modifier = Modifier.size(28.dp)
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                                                     ) {
-                                                        Icon(
-                                                            imageVector = Icons.Default.DeleteOutline,
-                                                            contentDescription = "Delete path record",
-                                                            tint = NeonPink,
-                                                            modifier = Modifier.size(17.dp)
-                                                        )
+                                                        // Segment distance indicator badge
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(DeepDarkBackground)
+                                                                .border(1.dp, GeometricBorder, RoundedCornerShape(8.dp))
+                                                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = String.format(Locale.US, "%.2f km", route.distance),
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                fontFamily = FontFamily.Monospace,
+                                                                color = if (route.mode == "gps") ElectricCyan else NeonPink
+                                                            )
+                                                        }
+
+                                                        // Native GPX exporter triggers
+                                                        IconButton(
+                                                            onClick = {
+                                                                val intent = Intent().apply {
+                                                                    action = Intent.ACTION_SEND
+                                                                    putExtra(Intent.EXTRA_TEXT, viewModel.exportRouteToGpx(route))
+                                                                    type = "text/xml"
+                                                                }
+                                                                context.startActivity(Intent.createChooser(intent, "Share Journey GPX"))
+                                                            },
+                                                            modifier = Modifier.size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Share,
+                                                                contentDescription = "Export GPX data",
+                                                                tint = TextMuted,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+
+                                                        // CSV timed coordinate exporter triggers
+                                                        IconButton(
+                                                            onClick = {
+                                                                val intent = Intent().apply {
+                                                                    action = Intent.ACTION_SEND
+                                                                    putExtra(Intent.EXTRA_TEXT, viewModel.exportRouteToCsvWithTimestamps(route))
+                                                                    type = "text/csv"
+                                                                }
+                                                                context.startActivity(Intent.createChooser(intent, "Share Coordinates CSV"))
+                                                            },
+                                                            modifier = Modifier.size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Download,
+                                                                contentDescription = "Export CSV with Timestamps",
+                                                                tint = TextMuted,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+
+                                                        // Trash routing cleaner
+                                                        IconButton(
+                                                            onClick = {
+                                                                pendingRouteForDeletion = route
+                                                            },
+                                                            modifier = Modifier.size(28.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.DeleteOutline,
+                                                                contentDescription = "Delete path record",
+                                                                tint = NeonPink,
+                                                                modifier = Modifier.size(17.dp)
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }
