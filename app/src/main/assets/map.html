@@ -9,29 +9,29 @@
             height: 100%;
             margin: 0;
             padding: 0;
-            background-color: #0d0d13;
+            background-color: #050508;
         }
         /* Custom styles to match the dark motorcycle instrument-cluster theme */
         .leaflet-container {
-            background: #0d0d13 !important;
+            background: #050508 !important;
         }
         /* Style the attribution elegantly */
         .leaflet-control-attribution {
-            background: rgba(13, 13, 19, 0.7) !important;
-            color: #7a7a8a !important;
+            background: rgba(14, 14, 18, 0.8) !important;
+            color: #64748B !important;
             font-size: 8px !important;
         }
         .leaflet-control-attribution a {
-            color: #a3a3c2 !important;
+            color: #94A3B8 !important;
         }
         /* Custom markers for manual drawing */
         .draw-marker {
-            background-color: #ff6b00;
+            background-color: #FB923C;
             border: 2px solid #ffffff;
             border-radius: 50%;
             width: 12px;
             height: 12px;
-            box-shadow: 0 0 8px rgba(255, 107, 0, 0.8);
+            box-shadow: 0 0 10px rgba(251, 146, 60, 0.9);
         }
     </style>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -83,7 +83,7 @@
                 // Glow marker for dynamic cycle indicator
                 var glowIcon = L.divIcon({
                     className: '',
-                    html: '<div style="background-color: #00e5ff; border: 2px solid white; border-radius: 50%; width: 14px; height: 14px; box-shadow: 0 0 12px #00e5ff;"></div>',
+                    html: '<div style="background-color: #22D3EE; border: 2px solid white; border-radius: 50%; width: 14px; height: 14px; box-shadow: 0 0 12px #22D3EE;"></div>',
                     iconSize: [14, 14],
                     iconAnchor: [7, 7]
                 });
@@ -128,7 +128,7 @@
 
             // Draw line
             drawingPolyline = L.polyline(latlngs, {
-                color: '#ff6b00',
+                color: '#FB923C',
                 weight: 5,
                 opacity: 0.9,
                 dashArray: '5, 8',
@@ -173,7 +173,7 @@
                 if (latlngs.length < 2) return;
 
                 // Alternate or bright electric blue / orange accent coloring
-                var routeColor = route.mode === 'gps' ? '#00e5ff' : '#ff007f'; // electric cyan or neon pink
+                var routeColor = route.mode === 'gps' ? '#22D3EE' : '#F43F5E'; // electric cyan or neon pink
 
                 var polyline = L.polyline(latlngs, {
                     color: routeColor,
@@ -215,12 +215,12 @@
 
             // Neon green / electric pulse style for active track
             currentRidePolyline = L.polyline(latlngs, {
-                color: '#39ff14', // neon green
+                color: '#10B981', // active live emerald green
                 weight: 8,
                 opacity: 0.95,
                 lineJoin: 'round',
                 lineCap: 'round',
-                shadowColor: '#39ff14',
+                shadowColor: '#10B981',
                 shadowBlur: 10
             }).addTo(map);
 

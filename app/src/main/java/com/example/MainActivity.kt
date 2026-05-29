@@ -51,7 +51,7 @@ import com.example.data.RouteRepository
 import com.example.ui.LeafletMapView
 import com.example.ui.RoadTrackerViewModel
 import com.example.ui.RoadTrackerViewModelFactory
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.theme.*
 import com.google.android.gms.location.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -227,79 +227,116 @@ fun RoadTrackerApp(
         modifier = Modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.statusBars
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .background(Color(0xFF08080C))
+                .background(DeepDarkBackground)
         ) {
-            // 1. Leaflet Interactive Map Layer (Taking full screen space)
-            LeafletMapView(
-                modifier = Modifier.fillMaxSize(),
-                viewModel = viewModel,
-                userLocation = currentUserLocation.value
-            )
-
-            // 2. Head-Up Display: Dynamic TFT Dashboard Stats (Top Overlays)
-            Column(
+            // 1. Header Stats Bar (Material 3 Surface Container)
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(SlateCockpitSurface)
+                    .border(1.dp, GeometricBorder, RoundedCornerShape(24.dp))
                     .padding(16.dp)
-                    .align(Alignment.TopCenter)
             ) {
-                // Main stats block
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xCC111116))
-                        .border(1.dp, Color(0x3300E5FF), RoundedCornerShape(16.dp))
-                        .padding(14.dp)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Lifetime Coverage Stats Column
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
                     ) {
-                        // Total coverage
-                        Column {
+                        Text(
+                            text = "LIFETIME",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ElectricCyan,
+                            letterSpacing = 1.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.Bottom) {
                             Text(
-                                text = "TOTAL COVERAGE",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF8E8E93),
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = String.format("%.1f KM", totalDistance),
+                                text = String.format(Locale.getDefault(), "%,.0f", totalDistance),
                                 fontSize = 22.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF00E5FF),
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
                                 fontFamily = FontFamily.Monospace
                             )
-                        }
-
-                        // Total journeys
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Spacer(modifier = Modifier.width(3.dp))
                             Text(
-                                text = "SAVED PATHS",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF8E8E93),
-                                letterSpacing = 1.sp
-                            )
-                            Text(
-                                text = "$totalRidesCount",
-                                fontSize = 22.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFFFF6B00),
-                                fontFamily = FontFamily.Monospace
+                                text = "KM",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = TextMuted
                             )
                         }
+                    }
 
-                        // GPS Indicator status lamp
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Divider Lines
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(32.dp)
+                            .background(GeometricBorder)
+                    )
+
+                    // Tracked Routes Count Column
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "ROUTES",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CockpitOrange,
+                            letterSpacing = 1.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "$totalRidesCount",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // Divider Lines
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .height(32.dp)
+                            .background(GeometricBorder)
+                    )
+
+                    // Ready Status Indicators with Glow Effect
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = "STATUS",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = NeonGreen,
+                            letterSpacing = 1.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
                             val pulseState = rememberInfiniteTransition(label = "gpsGlow")
                             val alphaGlow by pulseState.animateFloat(
-                                initialValue = 0.3f,
+                                initialValue = 0.4f,
                                 targetValue = 1.0f,
                                 animationSpec = infiniteRepeatable(
                                     animation = tween(1200, easing = EaseInOutSine),
@@ -307,507 +344,537 @@ fun RoadTrackerApp(
                                 ),
                                 label = "glow"
                             )
-                            
                             Box(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
                                     .background(
-                                        if (isTracking) Color(0xFF39FF14)
-                                        else if (hasLocationPermission) Color(0xFF00E5FF)
-                                        else Color(0xFFFF007F)
+                                        if (isTracking) NeonGreen
+                                        else if (hasLocationPermission) ElectricCyan
+                                        else NeonPink
                                     )
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = if (isTracking) "REC GO" else if (hasLocationPermission) "GPS RDY" else "NO GPS",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (isTracking) Color(0xFF39FF14).copy(alpha = alphaGlow) else Color(0xFFE5E5EA),
-                                fontWeight = FontWeight.Medium
+                                text = if (isTracking) "ACTIVE" else "READY",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = if (isTracking) alphaGlow else 1.0f)
                             )
                         }
                     }
                 }
+            }
 
-                Spacer(modifier = Modifier.height(10.dp))
+            // 2. Main Map Area (Hero Section) framed nicely
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(MapSubFrame)
+                    .border(1.5.dp, SlateCockpitSurface, RoundedCornerShape(32.dp))
+            ) {
+                // Interactive Leaflet Map Inside Frame
+                LeafletMapView(
+                    modifier = Modifier.fillMaxSize(),
+                    viewModel = viewModel,
+                    userLocation = currentUserLocation.value
+                )
 
-                // Active Recording HUD Overlay
-                AnimatedVisibility(
-                    visible = isTracking,
-                    enter = slideInVertically() + fadeIn(),
-                    exit = slideOutVertically() + fadeOut()
+                // Head-Up Navigation Dashboards floating on Map
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp)
+                        .align(Alignment.TopCenter)
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xDD0D0D13))
-                            .border(1.dp, Color(0xFF39FF14), RoundedCornerShape(12.dp))
-                            .padding(12.dp)
+                    // Active GPS Recording HUD Overlay
+                    AnimatedVisibility(
+                        visible = isTracking,
+                        enter = slideInVertically() + fadeIn(),
+                        exit = slideOutVertically() + fadeOut()
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceAround,
-                            verticalAlignment = Alignment.CenterVertically
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(GlassyOverlay)
+                                .border(1.dp, NeonGreen, RoundedCornerShape(16.dp))
+                                .padding(14.dp)
                         ) {
-                            // Trip Distance
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("TRIP DIST", fontSize = 9.sp, color = Color(0xFF8E8E93))
-                                Text(
-                                    text = String.format("%.2f KM", activeDistance),
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF39FF14),
-                                    fontFamily = FontFamily.Monospace
-                                )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceAround,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Live Trip Distance
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("TRIP DIST", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                    Text(
+                                        text = String.format("%.2f KM", activeDistance),
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = NeonGreen,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                // Live Speed
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("SPEED", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                    Text(
+                                        text = String.format("%.0f KM/H", currentSpeedKmh),
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                // Elapse stopwatch timer
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text("DURATION", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                    Text(
+                                        text = formatElapsedTime(elapsedSeconds),
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
                             }
-                            // Odometer speed
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("SPEED", fontSize = 9.sp, color = Color(0xFF8E8E93))
+                        }
+                    }
+
+                    // Manual Drawing HUD Overlay
+                    AnimatedVisibility(
+                        visible = isDrawingMode,
+                        enter = slideInVertically() + fadeIn(),
+                        exit = slideOutVertically() + fadeOut()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(GlassyOverlay)
+                                .border(1.dp, CockpitOrange, RoundedCornerShape(16.dp))
+                                .padding(12.dp)
+                        ) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(
+                                            imageVector = Icons.Default.EditRoad,
+                                            contentDescription = "Edit Mode",
+                                            tint = CockpitOrange,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "MANUAL ROUTE DESIGN",
+                                            fontSize = 11.sp,
+                                            color = CockpitOrange,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.sp
+                                        )
+                                    }
+                                    Text(
+                                        text = String.format("%.2f KM", drawingDistance),
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ElectricCyan,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = String.format("%.0f KM/H", currentSpeedKmh),
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFE5E5EA),
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                            // Elapsed stopwatch
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("DURATION", fontSize = 9.sp, color = Color(0xFF8E8E93))
-                                Text(
-                                    text = formatElapsedTime(elapsedSeconds),
-                                    fontSize = 17.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFFE5E5EA),
-                                    fontFamily = FontFamily.Monospace
+                                    text = "Tap coordinates on map to build path nodes. Tap any marker node to remove it.",
+                                    fontSize = 10.sp,
+                                    color = TextSilver
                                 )
                             }
                         }
                     }
                 }
 
-                // Manual Drawing HUD Overlay
-                AnimatedVisibility(
-                    visible = isDrawingMode,
-                    enter = slideInVertically() + fadeIn(),
-                    exit = slideOutVertically() + fadeOut()
+                // 3. Floating Quick Action Buttons on Map
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = if (isSheetExpanded) 360.dp else 16.dp, end = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalAlignment = Alignment.End
                 ) {
-                    Box(
+                    // Location zoom controls
+                    FloatingActionButton(
+                        onClick = {
+                            onFetchLastLocation()
+                            currentUserLocation.value?.let {
+                                viewModel.selectRoute(null) 
+                            }
+                        },
+                        containerColor = SlateCockpitSurface,
+                        contentColor = ElectricCyan,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MyLocation,
+                            contentDescription = "Center Location",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Drawing toggle modes
+                    FloatingActionButton(
+                        onClick = {
+                            viewModel.toggleDrawingMode()
+                        },
+                        containerColor = if (isDrawingMode) CockpitOrange else SlateCockpitSurface,
+                        contentColor = if (isDrawingMode) DeepDarkBackground else CockpitOrange,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isDrawingMode) Icons.Default.Map else Icons.Default.Gesture,
+                            contentDescription = "Manual Drawing mode",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Saved routes list controller drawer button
+                    FloatingActionButton(
+                        onClick = {
+                            isSheetExpanded = !isSheetExpanded
+                        },
+                        containerColor = if (isSheetExpanded) ElectricCyan else SlateCockpitSurface,
+                        contentColor = if (isSheetExpanded) DeepDarkBackground else ElectricCyan,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isSheetExpanded) Icons.Default.Book else Icons.Default.History,
+                            contentDescription = "Ride Journal Panel",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Start GPS ride tracking command button
+                    if (isDrawingMode) {
+                        // Save manual draw points
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Undo draw coordinates node
+                            FloatingActionButton(
+                                onClick = { viewModel.undoDrawingPoint() },
+                                containerColor = SlateCockpitSurface,
+                                contentColor = TextSilver,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.size(42.dp)
+                            ) {
+                                Icon(Icons.Default.Undo, contentDescription = "Undo node", modifier = Modifier.size(18.dp))
+                            }
+
+                            ExtendedFloatingActionButton(
+                                onClick = {
+                                    if (viewModel.drawingPoints.value.size < 2) {
+                                        Toast.makeText(context, "Traced road requires at least 2 coordinate points.", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        routeNameToSave = "Manual Ride - " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date())
+                                        showDrawingSaveDialog = true
+                                    }
+                                },
+                                containerColor = CockpitOrange,
+                                contentColor = DeepDarkBackground,
+                                shape = RoundedCornerShape(18.dp),
+                                icon = { Icon(Icons.Default.Done, "Save path") },
+                                text = { Text("Save Path", fontWeight = FontWeight.Bold) },
+                                modifier = Modifier.height(48.dp)
+                            )
+                        }
+                    } else {
+                        // Start recording ride tracking
+                        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                        val pulseScale by infiniteTransition.animateFloat(
+                            initialValue = 1.0f,
+                            targetValue = 1.08f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1000, easing = EaseInOutSine),
+                                repeatMode = RepeatMode.Reverse
+                            ),
+                            label = "scale"
+                        )
+
+                        ExtendedFloatingActionButton(
+                            onClick = {
+                                if (isTracking) {
+                                    routeNameToSave = "Motorcycle Route - " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date())
+                                    showSaveDialog = true
+                                } else {
+                                    viewModel.startTracking()
+                                }
+                            },
+                            containerColor = if (isTracking) NeonPink else ElectricCyan,
+                            contentColor = DeepDarkBackground,
+                            elevation = FloatingActionButtonDefaults.elevation(12.dp),
+                            shape = RoundedCornerShape(20.dp),
+                            modifier = Modifier
+                                .scale(if (isTracking) pulseScale else 1.0f)
+                                .height(56.dp)
+                                .testTag("submit_button"),
+                            icon = {
+                                Icon(
+                                    imageVector = if (isTracking) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                    contentDescription = if (isTracking) "Stop Recording" else "Start Ride Tracking",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = if (isTracking) "STOP RIDE" else "START RIDE",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    letterSpacing = 1.2.sp
+                                )
+                            }
+                        )
+                    }
+                }
+
+                // 4. Slide-Up Ride Journal History Sheet (floating within viewport container)
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = isSheetExpanded,
+                    enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                ) {
+                    Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xEE1A110D))
-                            .border(1.dp, Color(0xFFFF6B00), RoundedCornerShape(12.dp))
-                            .padding(10.dp)
+                            .height(340.dp),
+                        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                        color = GlassyOverlay,
+                        tonalElevation = 8.dp,
+                        border = BorderStroke(1.5.dp, GeometricBorder)
                     ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            // Header drag bar
                             Row(
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(
-                                        imageVector = Icons.Default.EditRoad,
-                                        contentDescription = "Edit Mode",
-                                        tint = Color(0xFFFF6B00),
-                                        modifier = Modifier.size(16.dp)
+                                        imageVector = Icons.Default.TwoWheeler,
+                                        contentDescription = "Motorbike routes",
+                                        tint = ElectricCyan
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
                                     Text(
-                                        text = "MANUAL ROUTE DESIGN",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFFFF6B00),
-                                        fontWeight = FontWeight.SemiBold
+                                        text = "RIDE COOPER JNL",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = Color.White,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.5.sp
                                     )
                                 }
-                                Text(
-                                    text = String.format("%.2f KM", drawingDistance),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xFF00E5FF),
-                                    fontFamily = FontFamily.Monospace
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Tap coordinates on map to build path nodes. Tap any marker node to remove it.",
-                                fontSize = 10.sp,
-                                color = Color(0xFFB3B3C2)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // 3. Floating Quick action buttons on Map
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(bottom = if (isSheetExpanded) 360.dp else 90.dp, end = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                horizontalAlignment = Alignment.End
-            ) {
-                // Location zoom utility
-                FloatingActionButton(
-                    onClick = {
-                        onFetchLastLocation()
-                        currentUserLocation.value?.let {
-                            viewModel.selectRoute(null) // trigger centering
-                        }
-                    },
-                    containerColor = Color(0xFF13131D),
-                    contentColor = Color(0xFF00E5FF),
-                    modifier = Modifier.size(46.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "Center Location",
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Drawing toggle mode fab
-                FloatingActionButton(
-                    onClick = {
-                        viewModel.toggleDrawingMode()
-                    },
-                    containerColor = if (isDrawingMode) Color(0xFFFF6B00) else Color(0xFF13131D),
-                    contentColor = if (isDrawingMode) Color(0xFF0D0D13) else Color(0xFFFF6B00),
-                    modifier = Modifier.size(46.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isDrawingMode) Icons.Default.Map else Icons.Default.Gesture,
-                        contentDescription = "Manual Drawing mode",
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                // Saved Routes Journal Drawer toggle
-                FloatingActionButton(
-                    onClick = {
-                        isSheetExpanded = !isSheetExpanded
-                    },
-                    containerColor = if (isSheetExpanded) Color(0xFF00E5FF) else Color(0xFF13131D),
-                    contentColor = if (isSheetExpanded) Color(0xFF0D0D13) else Color(0xFF00E5FF),
-                    modifier = Modifier.size(46.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isSheetExpanded) Icons.Default.Book else Icons.Default.History,
-                        contentDescription = "Ride Journal Panel",
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                // GIANT Live Stop/Start Tracking Control FAB
-                if (isDrawingMode) {
-                    // Manual Draw save/cancel group
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Undo point button
-                        FloatingActionButton(
-                            onClick = { viewModel.undoDrawingPoint() },
-                            containerColor = Color(0xCC1A1D24),
-                            contentColor = Color(0xFFE5E5EA),
-                            modifier = Modifier.size(42.dp)
-                        ) {
-                            Icon(Icons.Default.Undo, contentDescription = "Undo node", modifier = Modifier.size(18.dp))
-                        }
-
-                        // Save drawing route button
-                        ExtendedFloatingActionButton(
-                            onClick = {
-                                if (viewModel.drawingPoints.value.size < 2) {
-                                    Toast.makeText(context, "Traced road requires at least 2 coordinate points.", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    routeNameToSave = "Manual Ride - " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date())
-                                    showDrawingSaveDialog = true
-                                }
-                            },
-                            containerColor = Color(0xFFFF6B00),
-                            contentColor = Color(0xFF0D0D13),
-                            icon = { Icon(Icons.Default.Done, "Save path") },
-                            text = { Text("Save Path") },
-                            modifier = Modifier.height(48.dp)
-                        )
-                    }
-                } else {
-                    // Start GPS ride track toggle FAB (impossible to miss)
-                    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-                    val pulseScale by infiniteTransition.animateFloat(
-                        initialValue = 1.0f,
-                        targetValue = 1.08f,
-                        animationSpec = infiniteRepeatable(
-                            animation = tween(1000, easing = EaseInOutSine),
-                            repeatMode = RepeatMode.Reverse
-                        ),
-                        label = "scale"
-                    )
-
-                    ExtendedFloatingActionButton(
-                        onClick = {
-                            if (isTracking) {
-                                routeNameToSave = "Motorcycle Route - " + SimpleDateFormat("MMM d", Locale.getDefault()).format(Date())
-                                showSaveDialog = true
-                            } else {
-                                viewModel.startTracking()
-                            }
-                        },
-                        containerColor = if (isTracking) Color(0xFFFF007F) else Color(0xFF39FF14),
-                        contentColor = Color(0xFF08080C),
-                        elevation = FloatingActionButtonDefaults.elevation(12.dp),
-                        modifier = Modifier
-                            .scale(if (isTracking) pulseScale else 1.0f)
-                            .height(56.dp)
-                            .testTag("submit_button"),
-                        icon = {
-                            Icon(
-                                imageVector = if (isTracking) Icons.Default.Stop else Icons.Default.PlayArrow,
-                                contentDescription = if (isTracking) "Stop Recording" else "Start Ride Tracking",
-                                modifier = Modifier.size(24.dp)
-                            )
-                        },
-                        text = {
-                            Text(
-                                text = if (isTracking) "STOP RIDE" else "START RIDE",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium,
-                                letterSpacing = 1.2.sp
-                            )
-                        }
-                    )
-                }
-            }
-
-            // 4. Slide-Up Stats & Route History Journal Sheet
-            AnimatedVisibility(
-                visible = isSheetExpanded,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-            ) {
-                Surface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(340.dp),
-                    shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                    color = Color(0xFF0D0D15),
-                    tonalElevation = 8.dp,
-                    border = BorderStroke(1.dp, Color(0x3300E5FF))
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
-                    ) {
-                        // Drag handle / Title row
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.TwoWheeler,
-                                    contentDescription = "Motorbike routes",
-                                    tint = Color(0xFF00E5FF)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "RIDE COOPER JNL",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color(0xFFE5E5EA),
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.5.sp
-                                )
-                            }
-                            
-                            Row(
-                                modifier = Modifier.wrapContentSize(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                // Import GPX button
-                                TextButton(
-                                    onClick = { gpxPickerLauncher.launch("application/gpx+xml") },
-                                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF39FF14))
+                                
+                                Row(
+                                    modifier = Modifier.wrapContentSize(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Icon(Icons.Default.UploadFile, contentDescription = "Import Tracker GPX", modifier = Modifier.size(15.dp))
-                                    Spacer(modifier = Modifier.width(4.dp))
-                                    Text("IMPORT GPX", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                                }
-
-                                // Minimize icon
-                                IconButton(onClick = { isSheetExpanded = false }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Close sheet",
-                                        tint = Color(0xFF8E8E93)
-                                    )
-                                }
-                            }
-                        }
-
-                        Divider(color = Color(0x338E8E93), modifier = Modifier.padding(bottom = 8.dp))
-
-                        if (routes.isEmpty()) {
-                            // Blank empty state panel
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    Icon(
-                                        imageVector = Icons.Default.Map,
-                                        contentDescription = "No routes",
-                                        tint = Color(0xFF48484A),
-                                        modifier = Modifier.size(54.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(10.dp))
-                                    Text(
-                                        text = "Your coloring canvas is blank!",
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 14.sp,
-                                        color = Color(0xFF8E8E93)
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "Record a GPS ride or draw a custom traced path.",
-                                        fontSize = 11.sp,
-                                        color = Color(0xFF545456),
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        } else {
-                            // Saved routes LazyList
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                                contentPadding = PaddingValues(bottom = 12.dp)
-                            ) {
-                                items(routes) { route ->
-                                    val isCurrentSelected = selectedRoute?.id == route.id
-                                    
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(if (isCurrentSelected) Color(0xFF1E1E2F) else Color(0xFF13131D))
-                                            .border(
-                                                1.dp,
-                                                if (isCurrentSelected) Color(0xFF00E5FF) else Color(0x118E8E93),
-                                                RoundedCornerShape(10.dp)
-                                            )
-                                            .clickable {
-                                                viewModel.selectRoute(route)
-                                            }
-                                            .padding(10.dp)
+                                    // Custom Import GPX Route Button
+                                    TextButton(
+                                        onClick = { gpxPickerLauncher.launch("application/gpx+xml") },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = NeonGreen)
                                     ) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
+                                        Icon(Icons.Default.UploadFile, contentDescription = "Import Tracker GPX", modifier = Modifier.size(15.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("IMPORT GPX", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+
+                                    // Close
+                                    IconButton(onClick = { isSheetExpanded = false }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Close sheet",
+                                            tint = TextMuted
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(color = GeometricBorder, modifier = Modifier.padding(bottom = 8.dp))
+
+                            if (routes.isEmpty()) {
+                                // Empty placeholder state
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Icon(
+                                            imageVector = Icons.Default.Map,
+                                            contentDescription = "No routes",
+                                            tint = GeometricBorder,
+                                            modifier = Modifier.size(54.dp)
+                                        )
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Text(
+                                            text = "Your coloring canvas is blank!",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 14.sp,
+                                            color = TextMuted
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Record a GPS ride or draw a custom traced path.",
+                                            fontSize = 11.sp,
+                                            color = TextMuted.copy(alpha = 0.7f),
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            } else {
+                                // History journal paths column list
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    contentPadding = PaddingValues(bottom = 12.dp)
+                                ) {
+                                    items(routes) { route ->
+                                        val isCurrentSelected = selectedRoute?.id == route.id
+                                        
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(14.dp))
+                                                .background(if (isCurrentSelected) SlateCockpitSurface else DeepDarkBackground)
+                                                .border(
+                                                    1.5.dp,
+                                                    if (isCurrentSelected) ElectricCyan else GeometricBorder,
+                                                    RoundedCornerShape(14.dp)
+                                                )
+                                                .clickable {
+                                                    viewModel.selectRoute(route)
+                                                }
+                                                .padding(10.dp)
                                         ) {
                                             Row(
-                                                modifier = Modifier.weight(1f),
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                // Mode icon color tag indicator
-                                                Box(
-                                                    modifier = Modifier
-                                                        .size(4.dp, 36.dp)
-                                                        .clip(RoundedCornerShape(2.dp))
-                                                        .background(
-                                                            if (route.mode == "gps") Color(0xFF00E5FF)
-                                                            else Color(0xFFFF007F)
+                                                Row(
+                                                    modifier = Modifier.weight(1f),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    // Route mode colored visual tag indicators
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(4.dp, 36.dp)
+                                                            .clip(RoundedCornerShape(2.dp))
+                                                            .background(
+                                                                if (route.mode == "gps") ElectricCyan
+                                                                else NeonPink
+                                                            )
+                                                    )
+                                                    Spacer(modifier = Modifier.width(10.dp))
+                                                    
+                                                    Column(modifier = Modifier.fillMaxWidth()) {
+                                                        Text(
+                                                            text = route.name,
+                                                            fontSize = 13.sp,
+                                                            color = Color.White,
+                                                            fontWeight = FontWeight.Bold,
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
                                                         )
-                                                )
-                                                Spacer(modifier = Modifier.width(10.dp))
-                                                
-                                                Column(modifier = Modifier.fillMaxWidth()) {
-                                                    Text(
-                                                        text = route.name,
-                                                        fontSize = 13.sp,
-                                                        color = Color(0xFFE5E5EA),
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis
-                                                    )
-                                                    Spacer(modifier = Modifier.height(2.dp))
-                                                    Text(
-                                                        text = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(route.date)) + 
-                                                               " • " + if(route.mode == "gps") "🏍️ GPS" else "🗺️ Draw",
-                                                        fontSize = 11.sp,
-                                                        color = Color(0xFF8E8E93)
-                                                    )
-                                                }
-                                            }
-
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                // Distance display Badge
-                                                Box(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(6.dp))
-                                                        .background(Color(0xFF08080C))
-                                                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                                                ) {
-                                                    Text(
-                                                        text = String.format("%.2f km", route.distance),
-                                                        fontSize = 12.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        fontFamily = FontFamily.Monospace,
-                                                        color = if (route.mode == "gps") Color(0xFF00E5FF) else Color(0xFFFF007F)
-                                                    )
-                                                }
-                                                Spacer(modifier = Modifier.width(6.dp))
-
-                                                // Share GPX button
-                                                IconButton(
-                                                    onClick = {
-                                                        // Generate GPX string and share it natively
-                                                        val intent = Intent().apply {
-                                                            action = Intent.ACTION_SEND
-                                                            putExtra(Intent.EXTRA_TEXT, viewModel.exportRouteToGpx(route))
-                                                            type = "text/xml"
-                                                        }
-                                                        context.startActivity(Intent.createChooser(intent, "Share Journey GPX"))
-                                                    },
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Share,
-                                                        contentDescription = "Export GPX data",
-                                                        tint = Color(0xFF8E8E93),
-                                                        modifier = Modifier.size(15.dp)
-                                                    )
+                                                        Spacer(modifier = Modifier.height(2.dp))
+                                                        Text(
+                                                            text = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date(route.date)) + 
+                                                                   " • " + if(route.mode == "gps") "🏍️ GPS" else "🗺️ Draw",
+                                                            fontSize = 11.sp,
+                                                            color = TextMuted
+                                                        )
+                                                    }
                                                 }
 
-                                                // Trash/Delete Button
-                                                IconButton(
-                                                    onClick = {
-                                                        pendingRouteForDeletion = route
-                                                    },
-                                                    modifier = Modifier.size(28.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.DeleteOutline,
-                                                        contentDescription = "Delete path record",
-                                                        tint = Color(0xFFFF453A),
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    // Segment distance indicator badge
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(DeepDarkBackground)
+                                                            .border(1.dp, GeometricBorder, RoundedCornerShape(8.dp))
+                                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = String.format(Locale.US, "%.2f km", route.distance),
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            fontFamily = FontFamily.Monospace,
+                                                            color = if (route.mode == "gps") ElectricCyan else NeonPink
+                                                        )
+                                                    }
+                                                    Spacer(modifier = Modifier.width(6.dp))
+
+                                                    // Native GPX exporter triggers
+                                                    IconButton(
+                                                        onClick = {
+                                                            val intent = Intent().apply {
+                                                                action = Intent.ACTION_SEND
+                                                                putExtra(Intent.EXTRA_TEXT, viewModel.exportRouteToGpx(route))
+                                                                type = "text/xml"
+                                                            }
+                                                            context.startActivity(Intent.createChooser(intent, "Share Journey GPX"))
+                                                        },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Share,
+                                                            contentDescription = "Export GPX data",
+                                                            tint = TextMuted,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+
+                                                    // Trash routing cleaner
+                                                    IconButton(
+                                                        onClick = {
+                                                            pendingRouteForDeletion = route
+                                                        },
+                                                        modifier = Modifier.size(28.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.DeleteOutline,
+                                                            contentDescription = "Delete path record",
+                                                            tint = NeonPink,
+                                                            modifier = Modifier.size(17.dp)
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -827,13 +894,15 @@ fun RoadTrackerApp(
             onDismissRequest = { 
                 showSaveDialog = false 
             },
-            containerColor = Color(0xFF13131D),
+            containerColor = SlateCockpitSurface,
+            tonalElevation = 6.dp,
             title = {
                 Text(
                     "CONCLUDE RIDE MOTORCYCLE",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF00E5FF)
+                    color = ElectricCyan,
+                    letterSpacing = 1.2.sp
                 )
             },
             text = {
@@ -841,18 +910,18 @@ fun RoadTrackerApp(
                     Text(
                         "Would you like to save this logged route and add its coloring overlay permanently?",
                         fontSize = 12.sp,
-                        color = Color(0xFFE5E5EA),
+                        color = TextMuted,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     OutlinedTextField(
                         value = routeNameToSave,
                         onValueChange = { routeNameToSave = it },
-                        label = { Text("Route Name", color = Color(0xFF8E8E93)) },
+                        label = { Text("Route Name", color = TextMuted) },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFF00E5FF),
-                            unfocusedBorderColor = Color(0x33E5E5EA),
-                            focusedTextColor = Color(0xFFE5E5EA),
-                            unfocusedTextColor = Color(0xFFE5E5EA)
+                            focusedBorderColor = ElectricCyan,
+                            unfocusedBorderColor = GeometricBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
                         ),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -865,9 +934,9 @@ fun RoadTrackerApp(
                         viewModel.discardActiveTracking()
                         showSaveDialog = false
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFFF453A))
+                    colors = ButtonDefaults.textButtonColors(contentColor = NeonPink)
                 ) {
-                    Text("DISCARD", fontWeight = FontWeight.SemiBold)
+                    Text("DISCARD", fontWeight = FontWeight.Bold)
                 }
             },
             confirmButton = {
@@ -881,7 +950,7 @@ fun RoadTrackerApp(
                         }
                         showSaveDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF39FF14), contentColor = Color(0xFF0D0D13))
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonGreen, contentColor = DeepDarkBackground)
                 ) {
                     Text("SAVE RIDE", fontWeight = FontWeight.Bold)
                 }
@@ -893,13 +962,15 @@ fun RoadTrackerApp(
     if (showDrawingSaveDialog) {
         AlertDialog(
             onDismissRequest = { showDrawingSaveDialog = false },
-            containerColor = Color(0xFF13131D),
+            containerColor = SlateCockpitSurface,
+            tonalElevation = 6.dp,
             title = {
                 Text(
                     "SAVE MANUAL PATH TRACE",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFFF6B00)
+                    color = CockpitOrange,
+                    letterSpacing = 1.2.sp
                 )
             },
             text = {
@@ -907,18 +978,18 @@ fun RoadTrackerApp(
                     Text(
                         "Provide a custom name for this manually drawn route.",
                         fontSize = 12.sp,
-                        color = Color(0xFFE5E5EA),
+                        color = TextMuted,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
                     OutlinedTextField(
                         value = routeNameToSave,
                         onValueChange = { routeNameToSave = it },
-                        label = { Text("Route Name", color = Color(0xFF8E8E93)) },
+                        label = { Text("Route Name", color = TextMuted) },
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = Color(0xFFFF6B00),
-                            unfocusedBorderColor = Color(0x33E5E5EA),
-                            focusedTextColor = Color(0xFFE5E5EA),
-                            unfocusedTextColor = Color(0xFFE5E5EA)
+                            focusedBorderColor = CockpitOrange,
+                            unfocusedBorderColor = GeometricBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
                         ),
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
@@ -927,7 +998,7 @@ fun RoadTrackerApp(
             },
             dismissButton = {
                 TextButton(onClick = { showDrawingSaveDialog = false }) {
-                    Text("CANCEL", color = Color(0xFF8E8E93))
+                    Text("CANCEL", color = TextMuted, fontWeight = FontWeight.SemiBold)
                 }
             },
             confirmButton = {
@@ -941,7 +1012,7 @@ fun RoadTrackerApp(
                         }
                         showDrawingSaveDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B00), contentColor = Color(0xFF0D0D13))
+                    colors = ButtonDefaults.buttonColors(containerColor = CockpitOrange, contentColor = DeepDarkBackground)
                 ) {
                     Text("SAVE TRACE", fontWeight = FontWeight.Bold)
                 }
@@ -953,25 +1024,27 @@ fun RoadTrackerApp(
     if (pendingRouteForDeletion != null) {
         AlertDialog(
             onDismissRequest = { pendingRouteForDeletion = null },
-            containerColor = Color(0xFF13131D),
+            containerColor = SlateCockpitSurface,
+            tonalElevation = 6.dp,
             title = {
                 Text(
                     "DELETE ROUTE RECORD",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFFF453A)
+                    color = NeonPink,
+                    letterSpacing = 1.2.sp
                 )
             },
             text = {
                 Text(
                     "Are you absolutely sure you want to delete '${pendingRouteForDeletion?.name}'? This will erase the road coloring for this journey. Action cannot be undone.",
                     fontSize = 12.sp,
-                    color = Color(0xFFE5E5EA)
+                    color = TextSilver
                 )
             },
             dismissButton = {
                 TextButton(onClick = { pendingRouteForDeletion = null }) {
-                    Text("CANCEL", color = Color(0xFF8E8E93))
+                    Text("CANCEL", color = TextMuted, fontWeight = FontWeight.SemiBold)
                 }
             },
             confirmButton = {
@@ -983,7 +1056,7 @@ fun RoadTrackerApp(
                         }
                         pendingRouteForDeletion = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF453A), contentColor = Color(0xFFE5E5EA))
+                    colors = ButtonDefaults.buttonColors(containerColor = NeonPink, contentColor = Color.White)
                 ) {
                     Text("YES, DELETE", fontWeight = FontWeight.Bold)
                 }
