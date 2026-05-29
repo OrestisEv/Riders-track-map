@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body, html, #map {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #0d0d13;
+        }
+        /* Custom styles to match the dark motorcycle instrument-cluster theme */
+        .leaflet-container {
+            background: #0d0d13 !important;
+        }
+        /* Style the attribution elegantly */
+        .leaflet-control-attribution {
+            background: rgba(13, 13, 19, 0.7) !important;
+            color: #7a7a8a !important;
+            font-size: 8px !important;
+        }
+        .leaflet-control-attribution a {
+            color: #a3a3c2 !important;
+        }
+        /* Custom markers for manual drawing */
+        .draw-marker {
+            background-color: #ff6b00;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            width: 12px;
+            height: 12px;
+            box-shadow: 0 0 8px rgba(255, 107, 0, 0.8);
+        }
+    </style>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script>
+        var map;
+        var activeTileLayer;
+        var savedPolylines = {}; // Map of routeId -> Polyline
+        var currentRidePolyline = null;
+        var drawingPolyline = null;
+        var drawingMarkers = [];
+        var drawingMode = false;
+
+        // Default coordinate: fallback if GPS is not set yet (e.g., London or Munich)
+        var defaultLat = 51.505;
+        var defaultLng = -0.09;
+
+        // Initialize Map
+        map = L.map('map', {
+            zoomControl: false,
+            attributionControl: true
+        }).setView([defaultLat, defaultLng], 13);
+
+        // Add Dark Matter Tile Layer
+        activeTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 20,
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        // Map Click Event for Drawing Mode
+        map.on('click', function(e) {
+            if (drawingMode) {
+                var lat = e.latlng.lat;
+                var lng = e.latlng.lng;
+                if (window.AndroidInterface) {
+                    window.AndroidInterface.onMapClick(lat, lng);
+                }
+            }
+        });
+
+        // Interface: Update User Current Location Marker
+        var userLocationMarker = null;
+        function updateUserLocation(lat, lng, heading) {
+            var latlng = L.latLng(lat, lng);
+            if (!userLocationMarker) {
+                // Glow marker for dynamic cycle indicator
+                var glowIcon = L.divIcon({
+                    className: '',
+                    html: '<div style="background-color: #00e5ff; border: 2px solid white; border-radius: 50%; width: 14px; height: 14px; box-shadow: 0 0 12px #00e5ff;"></div>',
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7]
+                });
+                userLocationMarker = L.marker(latlng, { icon: glowIcon }).addTo(map);
+            } else {
+                userLocationMarker.setLatLng(latlng);
+            }
+        }
+
+        // Interface: Center map
+        function centerMap(lat, lng, zoomLevel) {
+            map.setView([lat, lng], zoomLevel || map.getZoom());
+        }
+
+        // Interface: Set Drawing Mode Status
+        function setDrawingMode(active) {
+            drawingMode = active;
+            if (!active) {
+                clearDrawing();
+            }
+        }
+
+        // Interface: Clear Manual Drawing points from visual layer
+        function clearDrawing() {
+            if (drawingPolyline) {
+                map.removeLayer(drawingPolyline);
+                drawingPolyline = null;
+            }
+            drawingMarkers.forEach(function(marker) {
+                map.removeLayer(marker);
+            });
+            drawingMarkers = [];
+        }
+
+        // Interface: Update current drawing path coordinates
+        function updateDrawingPoints(pointsJson) {
+            clearDrawing();
+            var points = JSON.parse(pointsJson); // List of {lat, lng}
+            if (points.length === 0) return;
+
+            var latlngs = points.map(p => [p.lat, p.lng]);
+
+            // Draw line
+            drawingPolyline = L.polyline(latlngs, {
+                color: '#ff6b00',
+                weight: 5,
+                opacity: 0.9,
+                dashArray: '5, 8',
+                lineJoin: 'round'
+            }).addTo(map);
+
+            // Place markers for each node
+            points.forEach(function(p, index) {
+                var customIcon = L.divIcon({
+                    className: 'draw-marker',
+                    iconSize: [12, 12],
+                    iconAnchor: [6, 6]
+                });
+                var marker = L.marker([p.lat, p.lng], { icon: customIcon }).addTo(map);
+                marker.on('click', function() {
+                    if (window.AndroidInterface) {
+                        window.AndroidInterface.onMarkerClick(index);
+                    }
+                });
+                drawingMarkers.push(marker);
+            });
+
+            // Adjust view to fit drawing points
+            if (points.length === 1) {
+                map.setView(latlngs[0], 15);
+            } else {
+                map.fitBounds(drawingPolyline.getBounds(), { padding: [40, 40] });
+            }
+        }
+
+        // Interface: Draw/Update Saved Lifetime Routes
+        function drawSavedRoutes(routesJson) {
+            // Remove previous saved polylines
+            Object.keys(savedPolylines).forEach(function(key) {
+                map.removeLayer(savedPolylines[key]);
+            });
+            savedPolylines = {};
+
+            var routes = JSON.parse(routesJson);
+            routes.forEach(function(route) {
+                var latlngs = route.coordinates.map(p => [p.lat, p.lng]);
+                if (latlngs.length < 2) return;
+
+                // Alternate or bright electric blue / orange accent coloring
+                var routeColor = route.mode === 'gps' ? '#00e5ff' : '#ff007f'; // electric cyan or neon pink
+
+                var polyline = L.polyline(latlngs, {
+                    color: routeColor,
+                    weight: 6,
+                    opacity: 0.85,
+                    lineJoin: 'round',
+                    lineCap: 'round'
+                }).addTo(map);
+
+                // Add nice tooltips with information
+                var formattedDate = new Date(route.date).toLocaleDateString();
+                var modeLabel = route.mode === 'gps' ? '🏍️ GPS Recorded' : '🗺️ Manual Draw';
+                polyline.bindTooltip(
+                    `<b>${route.name}</b><br/>${formattedDate} • ${route.distance.toFixed(2)} km<br/><i>${modeLabel}</i>`,
+                    { sticky: true, className: 'route-tooltip' }
+                );
+
+                polyline.on('click', function() {
+                    if (window.AndroidInterface) {
+                        window.AndroidInterface.onRouteSelect(route.id);
+                    }
+                });
+
+                savedPolylines[route.id] = polyline;
+            });
+        }
+
+        // Interface: Update Live Active Ride Path
+        function updateCurrentRide(pointsJson) {
+            if (currentRidePolyline) {
+                map.removeLayer(currentRidePolyline);
+                currentRidePolyline = null;
+            }
+
+            var points = JSON.parse(pointsJson);
+            if (points.length < 2) return;
+
+            var latlngs = points.map(p => [p.lat, p.lng]);
+
+            // Neon green / electric pulse style for active track
+            currentRidePolyline = L.polyline(latlngs, {
+                color: '#39ff14', // neon green
+                weight: 8,
+                opacity: 0.95,
+                lineJoin: 'round',
+                lineCap: 'round',
+                shadowColor: '#39ff14',
+                shadowBlur: 10
+            }).addTo(map);
+
+            // Automatically pan to keep the rider centered
+            var lastPoint = latlngs[latlngs.length - 1];
+            map.setView(lastPoint, map.getZoom());
+        }
+
+        // Interface: Fit Bounds to Selected Route
+        function focusRoute(pointsJson) {
+            var points = JSON.parse(pointsJson);
+            if (points.length === 0) return;
+            var latlngs = points.map(p => [p.lat, p.lng]);
+            if (latlngs.length === 1) {
+                map.setView(latlngs[0], 16);
+            } else {
+                var bounds = L.latLngBounds(latlngs);
+                map.fitBounds(bounds, { padding: [50, 50] });
+            }
+        }
+    </script>
+</body>
+</html>

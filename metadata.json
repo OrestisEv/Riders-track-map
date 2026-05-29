@@ -1,0 +1,6 @@
+{
+  "name": "RoadTracker",
+  "description": "A motorcycle road coverage tracking app with interactive map, live GPS recording, and statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
