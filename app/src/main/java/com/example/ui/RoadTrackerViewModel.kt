@@ -266,6 +266,124 @@ class RoadTrackerViewModel(
     private val _activeTelemetrySamples = MutableStateFlow<List<TelemetrySample>>(emptyList())
     val activeTelemetrySamples: StateFlow<List<TelemetrySample>> = _activeTelemetrySamples.asStateFlow()
 
+    // Handlebar Power Saver (Blackout Map Mode) State
+    private val _isPowerSaverMode = MutableStateFlow(false)
+    val isPowerSaverMode: StateFlow<Boolean> = _isPowerSaverMode.asStateFlow()
+
+    private val _isMapBlackedOut = MutableStateFlow(false)
+    val isMapBlackedOut: StateFlow<Boolean> = _isMapBlackedOut.asStateFlow()
+
+    private val _blackoutReason = MutableStateFlow("Power Saver Inactive")
+    val blackoutReason: StateFlow<String> = _blackoutReason.asStateFlow()
+
+    private val _recentBearings = mutableListOf<Double>()
+    private var temporaryWakeupJob: Job? = null
+
+    fun togglePowerSaverMode() {
+        val newValue = !_isPowerSaverMode.value
+        _isPowerSaverMode.value = newValue
+        if (!newValue) {
+            _isMapBlackedOut.value = false
+            _blackoutReason.value = "Power Saver Disabled"
+            temporaryWakeupJob?.cancel()
+        } else {
+            evaluatePowerSaver()
+        }
+    }
+
+    fun setPowerSaverMode(enabled: Boolean) {
+        _isPowerSaverMode.value = enabled
+        if (!enabled) {
+            _isMapBlackedOut.value = false
+            _blackoutReason.value = "Power Saver Disabled"
+            temporaryWakeupJob?.cancel()
+        } else {
+            evaluatePowerSaver()
+        }
+    }
+
+    fun tempWakeup() {
+        if (!_isMapBlackedOut.value) return
+        temporaryWakeupJob?.cancel()
+        temporaryWakeupJob = viewModelScope.launch {
+            _blackoutReason.value = "Temporarily Awake"
+            _isMapBlackedOut.value = false
+            delay(15000) // wake up for 15 seconds
+            evaluatePowerSaver()
+        }
+    }
+
+    private fun calculateBearingDifference(b1: Double, b2: Double): Double {
+        val diff = Math.abs(b1 - b2) % 360.0
+        return if (diff > 180.0) 360.0 - diff else diff
+    }
+
+    fun calculateBearing(p1: RoutePoint, p2: RoutePoint): Double {
+        val lat1 = Math.toRadians(p1.lat)
+        val lat2 = Math.toRadians(p2.lat)
+        val dLng = Math.toRadians(p2.lng - p1.lng)
+        
+        val y = Math.sin(dLng) * Math.cos(lat2)
+        val x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng)
+        val bearingRad = Math.atan2(y, x)
+        return (Math.toDegrees(bearingRad) + 360.0) % 360.0
+    }
+
+    fun evaluatePowerSaver() {
+        if (!_isPowerSaverMode.value || !_isTracking.value) {
+            _isMapBlackedOut.value = false
+            _blackoutReason.value = if (!_isTracking.value) "Not tracking" else "Power Saver Inactive"
+            return
+        }
+
+        // If a temporary manual wake-up is active, suspend automatic evaluation
+        if (temporaryWakeupJob?.isActive == true) {
+            return
+        }
+
+        val speed = _currentSpeedKmh.value
+        val lean = _currentLeanAngle.value
+        val gForce = _currentGForce.value
+
+        // 1. Stopped or very slow: rider needs maps to navigate intersections
+        if (speed < 5.0) {
+            _isMapBlackedOut.value = false
+            _blackoutReason.value = "Woke up: Speed low (< 5 km/h)"
+            return
+        }
+
+        // 2. High Lean angle: currently cornering (Threshold: 18 degrees)
+        if (lean > 18.0) {
+            _isMapBlackedOut.value = false
+            _blackoutReason.value = "Woke up: Lean angle " + String.format(Locale.US, "%.1f", lean) + "°"
+            return
+        }
+
+        // 3. High G-Force load: G-Spikes during braking/acceleration should wake screen
+        if (gForce > 1.35) {
+            _isMapBlackedOut.value = false
+            _blackoutReason.value = "Woke up: High Gforce " + String.format(Locale.US, "%.2f", gForce) + "G"
+            return
+        }
+
+        // 4. Direction Change (Curve Detection in recent path):
+        if (_recentBearings.isNotEmpty()) {
+            val latestBearing = _recentBearings.last()
+            val hasLargeDeviation = _recentBearings.any { b ->
+                calculateBearingDifference(b, latestBearing) > 12.0
+            }
+            if (hasLargeDeviation) {
+                _isMapBlackedOut.value = false
+                _blackoutReason.value = "Woke up: Curve detected"
+                return
+            }
+        }
+
+        // Target state satisfied! Screen turns black to save battery while riding straight.
+        _isMapBlackedOut.value = true
+        _blackoutReason.value = "Map Off: Riding Straight"
+    }
+
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
     private val accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
@@ -375,6 +493,9 @@ class RoadTrackerViewModel(
                 )
                 _activeTelemetrySamples.value = _activeTelemetrySamples.value + sample
 
+                // Periodically check Power Saver triggers
+                evaluatePowerSaver()
+
                 delay(1000)
             }
         }
@@ -395,6 +516,9 @@ class RoadTrackerViewModel(
         _activeCoordinates.value = emptyList()
         _activeDistance.value = 0.0
         _currentSpeedKmh.value = 0.0
+        _recentBearings.clear()
+        _isMapBlackedOut.value = false
+        temporaryWakeupJob?.cancel()
         registerSensors()
         startTimer()
     }
@@ -408,6 +532,13 @@ class RoadTrackerViewModel(
             val last = currentList.last()
             if (last.lat == point.lat && last.lng == point.lng) return
             
+            // Calculate bearing and append to sliding window
+            val bearing = calculateBearing(last, point)
+            _recentBearings.add(bearing)
+            if (_recentBearings.size > 8) {
+                _recentBearings.removeAt(0)
+            }
+
             // Increment distance using Haversine
             val increment = calculateDistance(last, point)
             _activeDistance.value += increment
@@ -420,12 +551,18 @@ class RoadTrackerViewModel(
         if (speedKmh > _maxSpeed.value) {
             _maxSpeed.value = speedKmh
         }
+
+        // Recalculate power saver blackout triggers
+        evaluatePowerSaver()
     }
 
     fun stopAndSaveTracking(customName: String?): String? {
         if (!_isTracking.value) return null
         _isTracking.value = false
         stopTimer()
+        _recentBearings.clear()
+        _isMapBlackedOut.value = false
+        temporaryWakeupJob?.cancel()
 
         val points = _activeCoordinates.value
         val dist = _activeDistance.value
@@ -477,6 +614,9 @@ class RoadTrackerViewModel(
     fun discardActiveTracking() {
         _isTracking.value = false
         stopTimer()
+        _recentBearings.clear()
+        _isMapBlackedOut.value = false
+        temporaryWakeupJob?.cancel()
         _activeCoordinates.value = emptyList()
         _activeDistance.value = 0.0
         unregisterSensors()

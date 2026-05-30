@@ -174,6 +174,11 @@ fun RoadTrackerApp(
     val drawingDistance by viewModel.drawingDistance.collectAsStateWithLifecycle()
     val selectedRoute by viewModel.selectedRoute.collectAsStateWithLifecycle()
     val currentSpeedKmh by viewModel.currentSpeedKmh.collectAsStateWithLifecycle()
+    val isPowerSaverMode by viewModel.isPowerSaverMode.collectAsStateWithLifecycle()
+    val isMapBlackedOut by viewModel.isMapBlackedOut.collectAsStateWithLifecycle()
+    val blackoutReason by viewModel.blackoutReason.collectAsStateWithLifecycle()
+    val currentLeanAngle by viewModel.currentLeanAngle.collectAsStateWithLifecycle()
+    val currentGForce by viewModel.currentGForce.collectAsStateWithLifecycle()
 
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
@@ -455,6 +460,7 @@ fun RoadTrackerApp(
                 )
 
                 // Head-Up Navigation Dashboards floating on Map
+                if (!isMapBlackedOut) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -787,8 +793,10 @@ fun RoadTrackerApp(
                         }
                     }
                 }
+                } // End if (!isMapBlackedOut) for top overlays
 
                 // 3. Floating Quick Action Buttons on Map
+                if (!isMapBlackedOut) {
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -1030,6 +1038,233 @@ fun RoadTrackerApp(
                                 )
                             }
                         )
+                    }
+                }
+                } // End if (!isMapBlackedOut) for FABs
+
+                // Power Saver Status HUD Toggle (floating Bottom Start)
+                if (!isMapBlackedOut) {
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(bottom = if (isSheetExpanded) 360.dp else 16.dp, start = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .wrapContentSize()
+                                .clickable { viewModel.togglePowerSaverMode() }
+                                .testTag("power_saver_toggle_button"),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isPowerSaverMode) GlassyOverlay else SlateCockpitSurface.copy(alpha = 0.6f)
+                            ),
+                            border = BorderStroke(
+                                1.5.dp,
+                                if (isPowerSaverMode) ElectricCyan else GeometricBorder
+                            ),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isPowerSaverMode) Icons.Default.Bolt else Icons.Default.Power,
+                                    contentDescription = "Toggle Power Saver",
+                                    tint = if (isPowerSaverMode) ElectricCyan else Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Column {
+                                    Text(
+                                        text = "HANDLEBAR SAVER",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isPowerSaverMode) ElectricCyan else TextMuted
+                                    )
+                                    Text(
+                                        text = if (isPowerSaverMode) "ACTIVE" else "DISABLED",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color.White
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Solid High-Contrast Blackout AMOLED Power Saver HUD Overlay
+                if (isMapBlackedOut) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xFF020204)) // Pitch-black background to shut down pixels
+                            .clickable { viewModel.tempWakeup() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            // Top Pulsing Active Banner
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(ElectricCyan.copy(alpha = 0.15f))
+                                    .border(1.dp, ElectricCyan.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val infinitePulse = rememberInfiniteTransition(label = "pulseActivity")
+                                val ledAlpha by infinitePulse.animateFloat(
+                                    initialValue = 0.3f,
+                                    targetValue = 1.0f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(800, easing = EaseInOutSine),
+                                        repeatMode = RepeatMode.Reverse
+                                    ),
+                                    label = "led"
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(ElectricCyan.copy(alpha = ledAlpha))
+                                )
+                                Text(
+                                    text = "HANDLEBAR SAVER ACTIVE",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ElectricCyan,
+                                    letterSpacing = 1.2.sp
+                                )
+                            }
+
+                            // Big Visual Speed Center Instrument
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "CURRENT SPEED",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextMuted,
+                                    letterSpacing = 1.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(
+                                    verticalAlignment = Alignment.Bottom,
+                                    horizontalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = String.format(Locale.US, "%.0f", currentSpeedKmh),
+                                        fontSize = 86.sp,
+                                        fontWeight = FontWeight.Black,
+                                        color = Color.White,
+                                        fontFamily = FontFamily.Monospace,
+                                        lineHeight = 86.sp
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "KM/H",
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ElectricCyan,
+                                        fontFamily = FontFamily.Monospace,
+                                        modifier = Modifier.padding(bottom = 14.dp)
+                                    )
+                                }
+                            }
+
+                            // Detailed Telemetry Panel
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                // Detailed stats row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceEvenly
+                                ) {
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("LIVE LEAN ANGLE", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = String.format(Locale.US, "%.1f°", currentLeanAngle),
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = NeonGreen,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                        Text("ACTIVE G-FORCE", fontSize = 9.sp, color = TextMuted, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = String.format(Locale.US, "%.2fG", currentGForce),
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            fontFamily = FontFamily.Monospace
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(4.dp))
+
+                                // Status reason text
+                                Text(
+                                    text = "Heuristic: $blackoutReason",
+                                    fontSize = 12.sp,
+                                    color = TextMuted,
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            // Bottom guide tips and disable control
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text(
+                                    text = "SCREEN OFF TO REDUCE HEAT & PRESERVE BATTERY",
+                                    fontSize = 10.sp,
+                                    color = TextMuted,
+                                    fontWeight = FontWeight.Medium,
+                                    textAlign = TextAlign.Center
+                                )
+                                Text(
+                                    text = "TAP SCREEN ANYWHERE TO REVEAL MAP (15s)",
+                                    fontSize = 12.sp,
+                                    color = NeonGreen,
+                                    fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.padding(bottom = 6.dp)
+                                )
+                                
+                                Button(
+                                    onClick = { viewModel.setPowerSaverMode(false) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = SlateCockpitSurface,
+                                        contentColor = Color.White
+                                    ),
+                                    border = BorderStroke(1.5.dp, GeometricBorder),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.height(36.dp)
+                                ) {
+                                    Text("Deactivate Saver", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
 

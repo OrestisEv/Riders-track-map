@@ -32,6 +32,7 @@ fun LeafletMapView(
     val mapCenter by viewModel.mapCenter.collectAsStateWithLifecycle()
     val searchMarker by viewModel.searchMarker.collectAsStateWithLifecycle()
     val isLightMap by viewModel.isLightMap.collectAsStateWithLifecycle()
+    val isMapBlackedOut by viewModel.isMapBlackedOut.collectAsStateWithLifecycle()
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isPageFinished by remember { mutableStateOf(false) }
@@ -128,8 +129,8 @@ fun LeafletMapView(
                 webViewInstance = this
             }
         },
-        update = {
-            // Nothing needed here since JavaScript evaluation handles incremental updates
+        update = { webView ->
+            webView.visibility = if (isMapBlackedOut) android.view.View.INVISIBLE else android.view.View.VISIBLE
         }
     )
 
@@ -141,35 +142,35 @@ fun LeafletMapView(
         }
     }
 
-    LaunchedEffect(activeCoordinates, isPageFinished) {
-        if (isPageFinished && webViewInstance != null) {
+    LaunchedEffect(activeCoordinates, isPageFinished, isMapBlackedOut) {
+        if (isPageFinished && webViewInstance != null && !isMapBlackedOut) {
             val json = JsonHelper.pointsToJson(activeCoordinates)
             webViewInstance?.evaluateJavascript("updateCurrentRide($json)", null)
         }
     }
 
-    LaunchedEffect(drawingPoints, drawingWaypoints, isPageFinished) {
-        if (isPageFinished && webViewInstance != null) {
+    LaunchedEffect(drawingPoints, drawingWaypoints, isPageFinished, isMapBlackedOut) {
+        if (isPageFinished && webViewInstance != null && !isMapBlackedOut) {
             val drawingJson = JsonHelper.pointsToJson(drawingPoints)
             val waypointsJson = JsonHelper.pointsToJson(drawingWaypoints)
             webViewInstance?.evaluateJavascript("updateDrawing($drawingJson, $waypointsJson)", null)
         }
     }
 
-    LaunchedEffect(isDrawingMode, isPageFinished) {
-        if (isPageFinished && webViewInstance != null) {
+    LaunchedEffect(isDrawingMode, isPageFinished, isMapBlackedOut) {
+        if (isPageFinished && webViewInstance != null && !isMapBlackedOut) {
             webViewInstance?.evaluateJavascript("setDrawingMode($isDrawingMode)", null)
         }
     }
 
-    LaunchedEffect(isLightMap, isPageFinished) {
-        if (isPageFinished && webViewInstance != null) {
+    LaunchedEffect(isLightMap, isPageFinished, isMapBlackedOut) {
+        if (isPageFinished && webViewInstance != null && !isMapBlackedOut) {
             webViewInstance?.evaluateJavascript("setMapTheme($isLightMap)", null)
         }
     }
 
-    LaunchedEffect(userLocation, isPageFinished) {
-        if (isPageFinished && webViewInstance != null && userLocation != null) {
+    LaunchedEffect(userLocation, isPageFinished, isMapBlackedOut) {
+        if (isPageFinished && webViewInstance != null && userLocation != null && !isMapBlackedOut) {
             webViewInstance?.evaluateJavascript("updateUserLocation(${userLocation.lat}, ${userLocation.lng})", null)
         }
     }
@@ -190,6 +191,29 @@ fun LeafletMapView(
                 webViewInstance?.evaluateJavascript("updateSearchResultMarker(${marker.lat}, ${marker.lng}, $escapedName)", null)
             } else {
                 webViewInstance?.evaluateJavascript("updateSearchResultMarker(null, null, null)", null)
+            }
+        }
+    }
+
+    // Wakeup repaint behavior: refresh all mapping parameters once the screen is awake
+    LaunchedEffect(isMapBlackedOut) {
+        if (!isMapBlackedOut && isPageFinished && webViewInstance != null) {
+            // Repaint active coordinate path
+            val activeCoors = viewModel.activeCoordinates.value
+            val activeJson = JsonHelper.pointsToJson(activeCoors)
+            webViewInstance?.evaluateJavascript("updateCurrentRide($activeJson)", null)
+            
+            // Re-focus user position
+            userLocation?.let {
+                webViewInstance?.evaluateJavascript("updateUserLocation(${it.lat}, ${it.lng})", null)
+                webViewInstance?.evaluateJavascript("centerMap(${it.lat}, ${it.lng}, 14)", null)
+            }
+
+            // Restore search markers
+            val marker = viewModel.searchMarker.value
+            if (marker != null) {
+                val escapedName = JsonHelper.stringToJson(marker.name)
+                webViewInstance?.evaluateJavascript("updateSearchResultMarker(${marker.lat}, ${marker.lng}, $escapedName)", null)
             }
         }
     }
