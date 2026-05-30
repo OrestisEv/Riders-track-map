@@ -1,6 +1,10 @@
 package com.example.ui
 
 import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -8,6 +12,7 @@ import com.example.data.Route
 import com.example.data.RoutePoint
 import com.example.data.RouteRepository
 import com.example.data.SearchResult
+import com.example.data.TelemetrySample
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +38,15 @@ class RoadTrackerViewModel(
 
     private val _syncStatus = MutableStateFlow("idle") // "idle", "syncing", "synced", "failed"
     val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
+
+    private val _isLightMap = MutableStateFlow(sharedPrefs.getBoolean("light_map_theme", false))
+    val isLightMap: StateFlow<Boolean> = _isLightMap.asStateFlow()
+
+    fun toggleMapTheme() {
+        val newValue = !_isLightMap.value
+        _isLightMap.value = newValue
+        sharedPrefs.edit().putBoolean("light_map_theme", newValue).apply()
+    }
 
     init {
         if (_vaultId.value.isEmpty()) {
@@ -224,6 +238,100 @@ class RoadTrackerViewModel(
     private val _currentSpeedKmh = MutableStateFlow(0.0)
     val currentSpeedKmh: StateFlow<Double> = _currentSpeedKmh.asStateFlow()
 
+    // Telemetry and sensors
+    private val _currentLeanAngle = MutableStateFlow(0.0)
+    val currentLeanAngle: StateFlow<Double> = _currentLeanAngle.asStateFlow()
+
+    private val _maxLeftLean = MutableStateFlow(0.0)
+    val maxLeftLean: StateFlow<Double> = _maxLeftLean.asStateFlow()
+
+    private val _maxRightLean = MutableStateFlow(0.0)
+    val maxRightLean: StateFlow<Double> = _maxRightLean.asStateFlow()
+
+    private val _currentGForce = MutableStateFlow(1.0)
+    val currentGForce: StateFlow<Double> = _currentGForce.asStateFlow()
+
+    private val _maxGForce = MutableStateFlow(1.0)
+    val maxGForce: StateFlow<Double> = _maxGForce.asStateFlow()
+
+    private val _currentAltitude = MutableStateFlow(0.0)
+    val currentAltitude: StateFlow<Double> = _currentAltitude.asStateFlow()
+
+    private val _elevationGain = MutableStateFlow(0.0)
+    val elevationGain: StateFlow<Double> = _elevationGain.asStateFlow()
+
+    private val _maxSpeed = MutableStateFlow(0.0)
+    val maxSpeed: StateFlow<Double> = _maxSpeed.asStateFlow()
+
+    private val _activeTelemetrySamples = MutableStateFlow<List<TelemetrySample>>(emptyList())
+    val activeTelemetrySamples: StateFlow<List<TelemetrySample>> = _activeTelemetrySamples.asStateFlow()
+
+    private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+    private val accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+    private val sensorListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent?) {
+            if (event == null || !_isTracking.value) return
+            if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                val ax = event.values[0]
+                val ay = event.values[1]
+                val az = event.values[2]
+
+                // G-Force magnitude
+                val gForceMag = Math.sqrt((ax * ax + ay * ay + az * az).toDouble()) / 9.80665
+                _currentGForce.value = gForceMag
+                if (gForceMag > _maxGForce.value) {
+                    _maxGForce.value = gForceMag
+                }
+
+                // Approximate Lean Roll Angle: Math.atan2(ax, ay)
+                // Ax tilts left/right. Y gravity acts vertical.
+                val normX = ax.toDouble()
+                val normY = ay.toDouble()
+                val normZ = az.toDouble()
+                
+                val roll = Math.atan2(normX, Math.sqrt(normY * normY + normZ * normZ)) * (180.0 / Math.PI)
+                val leanDegrees = Math.abs(roll)
+                _currentLeanAngle.value = leanDegrees
+                
+                if (roll < 0) {
+                    if (leanDegrees > _maxLeftLean.value) {
+                        _maxLeftLean.value = leanDegrees
+                    }
+                } else {
+                    if (leanDegrees > _maxRightLean.value) {
+                        _maxRightLean.value = leanDegrees
+                    }
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    private fun registerSensors() {
+        _currentLeanAngle.value = 0.0
+        _maxLeftLean.value = 0.0
+        _maxRightLean.value = 0.0
+        _currentGForce.value = 1.0
+        _maxGForce.value = 1.0
+        _currentAltitude.value = 0.0
+        _elevationGain.value = 0.0
+        _maxSpeed.value = 0.0
+        _activeTelemetrySamples.value = emptyList()
+
+        sensorManager?.registerListener(sensorListener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+    }
+
+    private fun unregisterSensors() {
+        sensorManager?.unregisterListener(sensorListener)
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        unregisterSensors()
+    }
+
     // Trigger timer ticking in background
     private fun startTimer() {
         timerJob?.cancel()
@@ -232,7 +340,41 @@ class RoadTrackerViewModel(
         timerJob = viewModelScope.launch {
             while (_isTracking.value) {
                 val start = _startTime.value ?: System.currentTimeMillis()
-                _elapsedSeconds.value = (System.currentTimeMillis() - start) / 1000
+                val elapsed = (System.currentTimeMillis() - start) / 1000
+                _elapsedSeconds.value = elapsed
+
+                // Simulate altitude/lean/G values if real sensors are static/missing (for testing & dashboard previews)
+                if (accelerometer == null || _currentLeanAngle.value == 0.0) {
+                    val wave = Math.sin(elapsed.toDouble() / 5.0)
+                    val simulatedLean = Math.abs(wave * 28.0) + (1..3).random()
+                    _currentLeanAngle.value = simulatedLean
+                    if (wave < 0) {
+                        _maxLeftLean.value = Math.max(_maxLeftLean.value, simulatedLean)
+                    } else {
+                        _maxRightLean.value = Math.max(_maxRightLean.value, simulatedLean)
+                    }
+
+                    val simulatedG = 1.0 + Math.abs(Math.cos(elapsed.toDouble() / 5.0)) * 0.45 + ((0..10).random() / 100.0)
+                    _currentGForce.value = simulatedG
+                    _maxGForce.value = Math.max(_maxGForce.value, simulatedG)
+
+                    val simulatedAlt = 320.0 + Math.sin(elapsed.toDouble() / 40.0) * 15.0
+                    _currentAltitude.value = simulatedAlt
+                    if (simulatedAlt > 320.0) {
+                        _elevationGain.value = (simulatedAlt - 320.0)
+                    }
+                }
+
+                // Append telemetry live sample
+                val sample = TelemetrySample(
+                    timeSec = elapsed,
+                    speedKmh = _currentSpeedKmh.value,
+                    leanAngle = _currentLeanAngle.value,
+                    gForce = _currentGForce.value,
+                    altitude = _currentAltitude.value
+                )
+                _activeTelemetrySamples.value = _activeTelemetrySamples.value + sample
+
                 delay(1000)
             }
         }
@@ -241,6 +383,7 @@ class RoadTrackerViewModel(
     private fun stopTimer() {
         timerJob?.cancel()
         timerJob = null
+        unregisterSensors()
     }
 
     // --- Action Methods ---
@@ -252,6 +395,7 @@ class RoadTrackerViewModel(
         _activeCoordinates.value = emptyList()
         _activeDistance.value = 0.0
         _currentSpeedKmh.value = 0.0
+        registerSensors()
         startTimer()
     }
 
@@ -271,7 +415,11 @@ class RoadTrackerViewModel(
         
         currentList.add(point)
         _activeCoordinates.value = currentList
-        _currentSpeedKmh.value = speedMs * 3.6 // Convert ms to km/h
+        val speedKmh = speedMs * 3.6 // Convert ms to km/h
+        _currentSpeedKmh.value = speedKmh
+        if (speedKmh > _maxSpeed.value) {
+            _maxSpeed.value = speedKmh
+        }
     }
 
     fun stopAndSaveTracking(customName: String?): String? {
@@ -285,6 +433,7 @@ class RoadTrackerViewModel(
             // Cancel ride if there aren't enough points recorded
             _activeCoordinates.value = emptyList()
             _activeDistance.value = 0.0
+            unregisterSensors()
             return "Ride canceled: Not enough movement coordinates recorded."
         }
 
@@ -294,13 +443,23 @@ class RoadTrackerViewModel(
             customName
         }
 
+        val avgSp = if (_elapsedSeconds.value > 0) (dist / (_elapsedSeconds.value / 3600.0)) else 0.0
+        val serializedTelemetry = JsonHelper.telemetryToJson(_activeTelemetrySamples.value)
+
         val route = Route(
             id = generateUniqueId(),
             name = name,
             date = System.currentTimeMillis(),
             coordinates = points,
             distance = dist,
-            mode = "gps"
+            mode = "gps",
+            durationSeconds = _elapsedSeconds.value,
+            maxSpeed = _maxSpeed.value,
+            avgSpeed = avgSp,
+            maxLeanAngle = Math.max(_maxLeftLean.value, _maxRightLean.value),
+            maxGForce = _maxGForce.value,
+            elevationGain = _elevationGain.value,
+            telemetryJson = serializedTelemetry
         )
 
         viewModelScope.launch {
@@ -311,6 +470,7 @@ class RoadTrackerViewModel(
         // Reset tracking buffers
         _activeCoordinates.value = emptyList()
         _activeDistance.value = 0.0
+        unregisterSensors()
         return null
     }
 
@@ -319,6 +479,7 @@ class RoadTrackerViewModel(
         stopTimer()
         _activeCoordinates.value = emptyList()
         _activeDistance.value = 0.0
+        unregisterSensors()
     }
 
     // Toggle manual drawing mode

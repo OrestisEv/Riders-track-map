@@ -55,6 +55,8 @@ import com.example.ui.LeafletMapView
 import com.example.ui.RoadTrackerViewModel
 import com.example.ui.RoadTrackerViewModelFactory
 import com.example.ui.SavedRoutesPage
+import com.example.ui.TelemetryDashboardPage
+import com.example.ui.AboutCockpitPage
 import com.example.ui.theme.*
 import com.google.android.gms.location.*
 import kotlinx.coroutines.flow.collectLatest
@@ -180,6 +182,7 @@ fun RoadTrackerApp(
 
     val vaultId by viewModel.vaultId.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
+    val isLightMap by viewModel.isLightMap.collectAsStateWithLifecycle()
     var showSyncDialog by remember { mutableStateOf(false) }
 
     // Trigger Permission Launcher
@@ -252,6 +255,8 @@ fun RoadTrackerApp(
     // Bottom Sheet Expansion State
     var isSheetExpanded by remember { mutableStateOf(false) }
     var showRoutesPage by remember { mutableStateOf(false) }
+    var showTelemetryPage by remember { mutableStateOf(false) }
+    var showAboutPage by remember { mutableStateOf(false) }
 
     // Document picker for GPX files
     val gpxPickerLauncher = rememberLauncherForActivityResult(
@@ -302,7 +307,14 @@ fun RoadTrackerApp(
                     // Lifetime Coverage Stats Column
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                showTelemetryPage = true
+                            }
+                            .padding(vertical = 4.dp)
+                            .testTag("lifetime_stats_column")
                     ) {
                         Text(
                             text = "LIFETIME",
@@ -880,6 +892,61 @@ fun RoadTrackerApp(
                         )
                     }
 
+                    // Telemetry Dashboard Cockpit Button
+                    FloatingActionButton(
+                        onClick = {
+                            showTelemetryPage = true
+                        },
+                        containerColor = SlateCockpitSurface,
+                        contentColor = NeonPink,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(48.dp).testTag("telemetry_cockpit_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BarChart,
+                            contentDescription = "Telemetry Cockpit Dashboard",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Map Theme Toggle Button
+                    FloatingActionButton(
+                        onClick = {
+                            viewModel.toggleMapTheme()
+                        },
+                        containerColor = if (isLightMap) Color(0xFFFFD166) else SlateCockpitSurface,
+                        contentColor = if (isLightMap) DeepDarkBackground else Color.White,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isLightMap) Icons.Default.DarkMode else Icons.Default.LightMode,
+                            contentDescription = "Toggle Map Theme",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    // Velocitron Manifesto/About Button
+                    FloatingActionButton(
+                        onClick = {
+                            showAboutPage = true
+                        },
+                        containerColor = SlateCockpitSurface,
+                        contentColor = ElectricCyan,
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(48.dp).testTag("about_cockpit_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = "Velocitron Manifesto",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(6.dp))
 
                     // Start GPS ride tracking command button
@@ -1361,6 +1428,35 @@ fun RoadTrackerApp(
             exportRouteToCsv = { viewModel.exportRouteToCsvWithTimestamps(it) },
             exportAllRoutesToJson = { viewModel.exportAllRoutesToJson(it) },
             importGpx = { viewModel.importGpx(it) }
+        )
+    }
+
+    // Full Screen Overlay Page showing motorbike telemetry charts
+    AnimatedVisibility(
+        visible = showTelemetryPage,
+        enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+        exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        TelemetryDashboardPage(
+            routes = routes,
+            selectedRoute = selectedRoute,
+            onBack = { showTelemetryPage = false },
+            onSelectRoute = { route2 ->
+                viewModel.selectRoute(route2)
+            }
+        )
+    }
+
+    // Full Screen Overlay Manifesto About Page
+    AnimatedVisibility(
+        visible = showAboutPage,
+        enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+        exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        AboutCockpitPage(
+            onBack = { showAboutPage = false }
         )
     }
 

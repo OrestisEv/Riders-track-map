@@ -31,6 +31,7 @@ fun LeafletMapView(
     val isDrawingMode by viewModel.isDrawingMode.collectAsStateWithLifecycle()
     val mapCenter by viewModel.mapCenter.collectAsStateWithLifecycle()
     val searchMarker by viewModel.searchMarker.collectAsStateWithLifecycle()
+    val isLightMap by viewModel.isLightMap.collectAsStateWithLifecycle()
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isPageFinished by remember { mutableStateOf(false) }
@@ -49,6 +50,8 @@ fun LeafletMapView(
                         isPageFinished = true
                         
                         // Push initial states upon loading safely from state values
+                        evaluateJavascript("setMapTheme(${viewModel.isLightMap.value})", null)
+
                         val currentRoutes = viewModel.allRoutes.value
                         val routesJson = JsonHelper.routesToJson(currentRoutes)
                         evaluateJavascript("drawSavedRoutes($routesJson)", null)
@@ -156,6 +159,12 @@ fun LeafletMapView(
     LaunchedEffect(isDrawingMode, isPageFinished) {
         if (isPageFinished && webViewInstance != null) {
             webViewInstance?.evaluateJavascript("setDrawingMode($isDrawingMode)", null)
+        }
+    }
+
+    LaunchedEffect(isLightMap, isPageFinished) {
+        if (isPageFinished && webViewInstance != null) {
+            webViewInstance?.evaluateJavascript("setMapTheme($isLightMap)", null)
         }
     }
 

@@ -58,11 +58,35 @@
             attributionControl: true
         }).setView([defaultLat, defaultLng], 13);
 
-        // Add Dark Matter Tile Layer
-        activeTileLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            maxZoom: 20,
-            attribution: '&copy; OpenStreetMap &copy; CARTO'
-        }).addTo(map);
+        // Map theme function
+        function setMapTheme(isLight) {
+            if (activeTileLayer) {
+                map.removeLayer(activeTileLayer);
+            }
+            var url = isLight 
+                ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+                : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+            
+            activeTileLayer = L.tileLayer(url, {
+                maxZoom: 20,
+                attribution: '&copy; OpenStreetMap &copy; CARTO'
+            }).addTo(map);
+
+            // Update container background colors dynamically to match
+            var body = document.body;
+            var container = document.querySelector('.leaflet-container');
+            if (isLight) {
+                body.style.backgroundColor = '#F8FAFC';
+                if (container) container.style.setProperty('background', '#F8FAFC', 'important');
+            } else {
+                body.style.backgroundColor = '#050508';
+                if (container) container.style.setProperty('background', '#050508', 'important');
+            }
+        }
+
+        // Initialize tile layer placeholder
+        activeTileLayer = null;
+        setMapTheme(false); // Default to Dark, will be set programmatically instantly via JS interface if needed
 
         // Map Click Event for Drawing Mode
         map.on('click', function(e) {

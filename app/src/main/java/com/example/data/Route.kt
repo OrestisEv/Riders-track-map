@@ -17,6 +17,14 @@ import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.flow.Flow
 
+data class TelemetrySample(
+    val timeSec: Long,
+    val speedKmh: Double,
+    val leanAngle: Double,
+    val gForce: Double,
+    val altitude: Double
+)
+
 data class RoutePoint(val lat: Double, val lng: Double)
 
 @Entity(tableName = "routes")
@@ -26,7 +34,14 @@ data class Route(
     val date: Long, // timestamp
     val coordinates: List<RoutePoint>,
     val distance: Double, // in km
-    val mode: String // "gps" or "manual"
+    val mode: String, // "gps" or "manual"
+    val durationSeconds: Long = 0L,
+    val maxSpeed: Double = 0.0,
+    val avgSpeed: Double = 0.0,
+    val maxLeanAngle: Double = 0.0,
+    val maxGForce: Double = 0.0,
+    val elevationGain: Double = 0.0,
+    val telemetryJson: String = ""
 )
 
 class Converters {
@@ -57,7 +72,7 @@ interface RouteDao {
     suspend fun deleteRouteById(id: String)
 }
 
-@Database(entities = [Route::class], version = 1, exportSchema = false)
+@Database(entities = [Route::class], version = 2, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun routeDao(): RouteDao
@@ -72,7 +87,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "roadtracker_database"
-                ).build()
+                )
+                .fallbackToDestructiveMigration()
+                .build()
                 INSTANCE = instance
                 instance
             }
