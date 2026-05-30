@@ -1,5 +1,5 @@
 # 🏍️ Velocitron RoadTracker & Telemetry Cockpit
-> **The Ultimate Moto-Dynamic Analysis & GPS Route Vault for Enthusiast Riders**
+> **The Ultimate Moto-Dynamic Analysis & GPS Route Vault for Enthusiast Riders, like you!**
 
 Velocitron merges state-of-the-art **GPS path tracking/curating** with a high-octane **Physics Telemetry Cockpit**, letting motorcycle riders analyze lean angles, cornering gravitational forces, speed histograms, and vertical ascent profiles—all synced seamlessly to an offline-first encrypted Cloud replication vault.
 
