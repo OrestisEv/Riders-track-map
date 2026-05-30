@@ -98,6 +98,28 @@
             map.setView([lat, lng], zoomLevel || map.getZoom());
         }
 
+        // Interface: Search Result Pin Marker
+        var searchResultMarker = null;
+        function updateSearchResultMarker(lat, lng, name) {
+            if (searchResultMarker) {
+                map.removeLayer(searchResultMarker);
+                searchResultMarker = null;
+            }
+            if (lat === undefined || lat === null || lng === undefined || lng === null) return;
+            
+            var latlng = [lat, lng];
+            var searchIcon = L.divIcon({
+                className: '',
+                html: '<div style="background-color: #EF4444; width: 14px; height: 14px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 10px rgba(239, 68, 68, 0.9);"></div>',
+                iconSize: [14, 14],
+                iconAnchor: [7, 7]
+            });
+            searchResultMarker = L.marker(latlng, { icon: searchIcon }).addTo(map);
+            if (name) {
+                searchResultMarker.bindPopup("<b>" + name + "</b>").openPopup();
+            }
+        }
+
         // Interface: Set Drawing Mode Status
         function setDrawingMode(active) {
             drawingMode = active;
@@ -118,10 +140,11 @@
             drawingMarkers = [];
         }
 
-        // Interface: Update current drawing path coordinates
-        function updateDrawingPoints(pointsData) {
+        // Interface: Update current drawing path coordinates and waypoints
+        function updateDrawing(pointsData, waypointsData) {
             clearDrawing();
             var points = typeof pointsData === 'string' ? JSON.parse(pointsData) : pointsData;
+            var waypoints = typeof waypointsData === 'string' ? JSON.parse(waypointsData) : waypointsData;
             if (!points || points.length === 0) return;
 
             var latlngs = points.map(p => [p.lat, p.lng]);
@@ -135,21 +158,23 @@
                 lineJoin: 'round'
             }).addTo(map);
 
-            // Place markers for each node
-            points.forEach(function(p, index) {
-                var customIcon = L.divIcon({
-                    className: 'draw-marker',
-                    iconSize: [12, 12],
-                    iconAnchor: [6, 6]
+            // Place markers for each active waypoint
+            if (waypoints && waypoints.length > 0) {
+                waypoints.forEach(function(p, index) {
+                    var customIcon = L.divIcon({
+                        className: 'draw-marker',
+                        iconSize: [12, 12],
+                        iconAnchor: [6, 6]
+                    });
+                    var marker = L.marker([p.lat, p.lng], { icon: customIcon }).addTo(map);
+                    marker.on('click', function() {
+                        if (window.AndroidInterface) {
+                            window.AndroidInterface.onMarkerClick(index);
+                        }
+                    });
+                    drawingMarkers.push(marker);
                 });
-                var marker = L.marker([p.lat, p.lng], { icon: customIcon }).addTo(map);
-                marker.on('click', function() {
-                    if (window.AndroidInterface) {
-                        window.AndroidInterface.onMarkerClick(index);
-                    }
-                });
-                drawingMarkers.push(marker);
-            });
+            }
 
             // Adjust view to fit drawing points
             if (points.length === 1) {

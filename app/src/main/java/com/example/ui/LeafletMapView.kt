@@ -27,8 +27,10 @@ fun LeafletMapView(
     val routes by viewModel.allRoutes.collectAsStateWithLifecycle()
     val activeCoordinates by viewModel.activeCoordinates.collectAsStateWithLifecycle()
     val drawingPoints by viewModel.drawingPoints.collectAsStateWithLifecycle()
+    val drawingWaypoints by viewModel.drawingWaypoints.collectAsStateWithLifecycle()
     val isDrawingMode by viewModel.isDrawingMode.collectAsStateWithLifecycle()
     val mapCenter by viewModel.mapCenter.collectAsStateWithLifecycle()
+    val searchMarker by viewModel.searchMarker.collectAsStateWithLifecycle()
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isPageFinished by remember { mutableStateOf(false) }
@@ -46,25 +48,35 @@ fun LeafletMapView(
                         super.onPageFinished(view, url)
                         isPageFinished = true
                         
-                        // Push initial states upon loading
-                        val routesJson = JsonHelper.routesToJson(routes)
+                        // Push initial states upon loading safely from state values
+                        val currentRoutes = viewModel.allRoutes.value
+                        val routesJson = JsonHelper.routesToJson(currentRoutes)
                         evaluateJavascript("drawSavedRoutes($routesJson)", null)
                         
-                        evaluateJavascript("setDrawingMode($isDrawingMode)", null)
+                        evaluateJavascript("setDrawingMode(${viewModel.isDrawingMode.value})", null)
                         
-                        if (activeCoordinates.isNotEmpty()) {
-                            val activeJson = JsonHelper.pointsToJson(activeCoordinates)
+                        val activeCoors = viewModel.activeCoordinates.value
+                        if (activeCoors.isNotEmpty()) {
+                            val activeJson = JsonHelper.pointsToJson(activeCoors)
                             evaluateJavascript("updateCurrentRide($activeJson)", null)
                         }
                         
-                        if (drawingPoints.isNotEmpty()) {
-                            val drawingJson = JsonHelper.pointsToJson(drawingPoints)
-                            evaluateJavascript("updateDrawingPoints($drawingJson)", null)
+                        val drPoints = viewModel.drawingPoints.value
+                        if (drPoints.isNotEmpty()) {
+                            val drawingJson = JsonHelper.pointsToJson(drPoints)
+                            val waypointsJson = JsonHelper.pointsToJson(viewModel.drawingWaypoints.value)
+                            evaluateJavascript("updateDrawing($drawingJson, $waypointsJson)", null)
                         }
                         
                         userLocation?.let {
                             evaluateJavascript("updateUserLocation(${it.lat}, ${it.lng})", null)
                             evaluateJavascript("centerMap(${it.lat}, ${it.lng}, 14)", null)
+                        }
+
+                        val currentSearchMarker = viewModel.searchMarker.value
+                        if (currentSearchMarker != null) {
+                            val escapedName = JsonHelper.stringToJson(currentSearchMarker.name)
+                            evaluateJavascript("updateSearchResultMarker(${currentSearchMarker.lat}, ${currentSearchMarker.lng}, $escapedName)", null)
                         }
                     }
                 }
@@ -103,7 +115,7 @@ fun LeafletMapView(
                     @JavascriptInterface
                     fun onRouteSelect(routeId: String) {
                         post {
-                            val route = routes.find { it.id == routeId }
+                            val route = viewModel.allRoutes.value.find { it.id == routeId }
                             viewModel.selectRoute(route)
                         }
                     }
@@ -133,10 +145,11 @@ fun LeafletMapView(
         }
     }
 
-    LaunchedEffect(drawingPoints, isPageFinished) {
+    LaunchedEffect(drawingPoints, drawingWaypoints, isPageFinished) {
         if (isPageFinished && webViewInstance != null) {
-            val json = JsonHelper.pointsToJson(drawingPoints)
-            webViewInstance?.evaluateJavascript("updateDrawingPoints($json)", null)
+            val drawingJson = JsonHelper.pointsToJson(drawingPoints)
+            val waypointsJson = JsonHelper.pointsToJson(drawingWaypoints)
+            webViewInstance?.evaluateJavascript("updateDrawing($drawingJson, $waypointsJson)", null)
         }
     }
 
@@ -157,6 +170,18 @@ fun LeafletMapView(
         if (isPageFinished && webViewInstance != null && center != null) {
             webViewInstance?.evaluateJavascript("centerMap(${center.lat}, ${center.lng}, 15)", null)
             viewModel.clearMapCenterTrigger()
+        }
+    }
+
+    LaunchedEffect(searchMarker, isPageFinished) {
+        if (isPageFinished && webViewInstance != null) {
+            val marker = searchMarker
+            if (marker != null) {
+                val escapedName = JsonHelper.stringToJson(marker.name)
+                webViewInstance?.evaluateJavascript("updateSearchResultMarker(${marker.lat}, ${marker.lng}, $escapedName)", null)
+            } else {
+                webViewInstance?.evaluateJavascript("updateSearchResultMarker(null, null, null)", null)
+            }
         }
     }
 }

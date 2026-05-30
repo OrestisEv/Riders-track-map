@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.Route
 import com.example.data.RoutePoint
 import com.example.data.RouteRepository
+import com.example.data.SearchResult
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +20,145 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel() {
+class RoadTrackerViewModel(
+    private val repository: RouteRepository,
+    private val context: Context
+) : ViewModel() {
+
+    // Cloud Backend Sync System
+    private val sharedPrefs = context.getSharedPreferences("roadtracker_cloud_sync", Context.MODE_PRIVATE)
+
+    private val _vaultId = MutableStateFlow(sharedPrefs.getString("vault_id", "") ?: "")
+    val vaultId: StateFlow<String> = _vaultId.asStateFlow()
+
+    private val _syncStatus = MutableStateFlow("idle") // "idle", "syncing", "synced", "failed"
+    val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
+
+    init {
+        if (_vaultId.value.isEmpty()) {
+            val randomId = "road_vault_" + (1000..9999).random() + "_" + (10..99).random()
+            _vaultId.value = randomId
+            sharedPrefs.edit().putString("vault_id", randomId).apply()
+        }
+        syncWithBackend()
+    }
+
+    fun updateVaultId(newId: String) {
+        val cleanId = newId.trim().lowercase().replace(Regex("[^a-z0-9_-]"), "")
+        if (cleanId.isNotEmpty()) {
+            _vaultId.value = cleanId
+            sharedPrefs.edit().putString("vault_id", cleanId).apply()
+            syncWithBackend()
+        }
+    }
+
+    fun syncWithBackend() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _syncStatus.value = "syncing"
+            val currentVaultId = _vaultId.value
+            if (currentVaultId.isEmpty()) {
+                _syncStatus.value = "idle"
+                return@launch
+            }
+
+            try {
+                // Wait briefly for allRoutes to initialize from Room DB
+                var localRoutes = allRoutes.value
+                var attempts = 0
+                while (localRoutes.isEmpty() && attempts < 20) {
+                    delay(100)
+                    localRoutes = allRoutes.value
+                    attempts++
+                }
+
+                val cloudJson = fetchFromCloud(currentVaultId)
+                val cloudRoutes = if (cloudJson != null) JsonHelper.jsonToRoutes(cloudJson) else null
+
+                val merged = mutableListOf<Route>()
+                merged.addAll(localRoutes)
+
+                if (cloudRoutes != null) {
+                    for (cloudRoute in cloudRoutes) {
+                        val existsLocally = localRoutes.any { it.id == cloudRoute.id }
+                        if (!existsLocally) {
+                            repository.insert(cloudRoute)
+                            merged.add(cloudRoute)
+                        }
+                    }
+                }
+
+                // If merged has new elements or sync started, push back to align cloud vault
+                val success = pushToCloud(currentVaultId, merged)
+                if (success) {
+                    _syncStatus.value = "synced"
+                } else {
+                    _syncStatus.value = "failed"
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("RoadTrackerViewModel", "Sync with backend failed", e)
+                _syncStatus.value = "failed"
+            }
+        }
+    }
+
+    fun triggerSyncPush() {
+        val currentVaultId = _vaultId.value
+        if (currentVaultId.isEmpty()) return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            _syncStatus.value = "syncing"
+            delay(600) // allow internal state flows to catch up
+            val currentRoutes = allRoutes.value
+            val success = pushToCloud(currentVaultId, currentRoutes)
+            if (success) {
+                _syncStatus.value = "synced"
+            } else {
+                _syncStatus.value = "failed"
+            }
+        }
+    }
+
+    private fun fetchFromCloud(vaultId: String): String? {
+        val urlString = "https://kvdb.io/$vaultId/routes"
+        try {
+            val url = java.net.URL(urlString)
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            if (connection.responseCode == 200) {
+                return connection.inputStream.bufferedReader().use { it.readText() }
+            } else if (connection.responseCode == 404) {
+                return "[]"
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("RoadTrackerViewModel", "Error fetching from Cloud Vault", e)
+        }
+        return null
+    }
+
+    private fun pushToCloud(vaultId: String, routes: List<Route>): Boolean {
+        val urlString = "https://kvdb.io/$vaultId/routes"
+        try {
+            val url = java.net.URL(urlString)
+            val connection = url.openConnection() as java.net.HttpURLConnection
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
+            connection.setRequestProperty("Content-Type", "application/json")
+            
+            val json = JsonHelper.routesToJson(routes)
+            connection.outputStream.use { os ->
+                os.write(json.toByteArray(charset("UTF-8")))
+            }
+            if (connection.responseCode == 200 || connection.responseCode == 201) {
+                return true
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("RoadTrackerViewModel", "Error pushing to Cloud Vault", e)
+        }
+        return false
+    }
 
     // Saved Routes from Room
     val allRoutes: StateFlow<List<Route>> = repository.allRoutes
@@ -51,6 +190,9 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
     private val _isDrawingMode = MutableStateFlow(false)
     val isDrawingMode: StateFlow<Boolean> = _isDrawingMode.asStateFlow()
 
+    private val _drawingWaypoints = MutableStateFlow<List<RoutePoint>>(emptyList())
+    val drawingWaypoints: StateFlow<List<RoutePoint>> = _drawingWaypoints.asStateFlow()
+
     private val _drawingPoints = MutableStateFlow<List<RoutePoint>>(emptyList())
     val drawingPoints: StateFlow<List<RoutePoint>> = _drawingPoints.asStateFlow()
 
@@ -64,6 +206,19 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
     // Map Center State
     private val _mapCenter = MutableStateFlow<RoutePoint?>(null)
     val mapCenter: StateFlow<RoutePoint?> = _mapCenter.asStateFlow()
+
+    // Address Search State (Like Google Maps)
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    private val _searchResults = MutableStateFlow<List<SearchResult>>(emptyList())
+    val searchResults: StateFlow<List<SearchResult>> = _searchResults.asStateFlow()
+
+    private val _isSearching = MutableStateFlow(false)
+    val isSearching: StateFlow<Boolean> = _isSearching.asStateFlow()
+
+    private val _searchMarker = MutableStateFlow<SearchResult?>(null)
+    val searchMarker: StateFlow<SearchResult?> = _searchMarker.asStateFlow()
 
     // Live Rider Speed / Current Altitude or details (insightful statistics)
     private val _currentSpeedKmh = MutableStateFlow(0.0)
@@ -150,6 +305,7 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
 
         viewModelScope.launch {
             repository.insert(route)
+            triggerSyncPush()
         }
 
         // Reset tracking buffers
@@ -169,6 +325,7 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
     fun toggleDrawingMode() {
         _isDrawingMode.value = !_isDrawingMode.value
         if (!_isDrawingMode.value) {
+            _drawingWaypoints.value = emptyList()
             _drawingPoints.value = emptyList()
             _drawingDistance.value = 0.0
         } else {
@@ -180,6 +337,7 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
     fun setDrawingModeActive(active: Boolean) {
         _isDrawingMode.value = active
         if (!active) {
+            _drawingWaypoints.value = emptyList()
             _drawingPoints.value = emptyList()
             _drawingDistance.value = 0.0
         }
@@ -187,29 +345,47 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
 
     fun addDrawingPoint(point: RoutePoint) {
         if (!_isDrawingMode.value) return
-        val currentList = _drawingPoints.value.toMutableList()
-        currentList.add(point)
-        _drawingPoints.value = currentList
-        _drawingDistance.value = calculatePathDistance(currentList)
+        val currentWaypoints = _drawingWaypoints.value.toMutableList()
+        currentWaypoints.add(point)
+        _drawingWaypoints.value = currentWaypoints
+
+        // Immediate straight-line feedback for responsive UX
+        _drawingPoints.value = currentWaypoints
+        _drawingDistance.value = calculatePathDistance(currentWaypoints)
+
+        // Asynchronously snap to roads using OSRM
+        triggerRoadRecalculation()
     }
 
     fun removeDrawingPoint(index: Int) {
         if (!_isDrawingMode.value) return
-        val currentList = _drawingPoints.value.toMutableList()
-        if (index in currentList.indices) {
-            currentList.removeAt(index)
-            _drawingPoints.value = currentList
-            _drawingDistance.value = calculatePathDistance(currentList)
+        val currentWaypoints = _drawingWaypoints.value.toMutableList()
+        if (index in currentWaypoints.indices) {
+            currentWaypoints.removeAt(index)
+            _drawingWaypoints.value = currentWaypoints
+
+            // Immediate fall back
+            _drawingPoints.value = currentWaypoints
+            _drawingDistance.value = calculatePathDistance(currentWaypoints)
+
+            // Asynchronously snap to roads using OSRM
+            triggerRoadRecalculation()
         }
     }
 
     fun undoDrawingPoint() {
         if (!_isDrawingMode.value) return
-        val currentList = _drawingPoints.value.toMutableList()
-        if (currentList.isNotEmpty()) {
-            currentList.removeAt(currentList.size - 1)
-            _drawingPoints.value = currentList
-            _drawingDistance.value = calculatePathDistance(currentList)
+        val currentWaypoints = _drawingWaypoints.value.toMutableList()
+        if (currentWaypoints.isNotEmpty()) {
+            currentWaypoints.removeAt(currentWaypoints.size - 1)
+            _drawingWaypoints.value = currentWaypoints
+
+            // Immediate fall back
+            _drawingPoints.value = currentWaypoints
+            _drawingDistance.value = calculatePathDistance(currentWaypoints)
+
+            // Asynchronously snap to roads using OSRM
+            triggerRoadRecalculation()
         }
     }
 
@@ -237,13 +413,76 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
 
         viewModelScope.launch {
             repository.insert(route)
+            triggerSyncPush()
         }
 
         // Reset drawing buffers
+        _drawingWaypoints.value = emptyList()
         _drawingPoints.value = emptyList()
         _drawingDistance.value = 0.0
         _isDrawingMode.value = false
         return null
+    }
+
+    private var recalculationJob: Job? = null
+
+    private fun triggerRoadRecalculation() {
+        val waypoints = _drawingWaypoints.value
+        if (waypoints.size < 2) {
+            _drawingPoints.value = waypoints
+            _drawingDistance.value = calculatePathDistance(waypoints)
+            return
+        }
+
+        recalculationJob?.cancel()
+        recalculationJob = viewModelScope.launch {
+            val snapped = fetchRoadRouteMulti(waypoints)
+            if (snapped.isNotEmpty()) {
+                _drawingPoints.value = snapped
+                _drawingDistance.value = calculatePathDistance(snapped)
+            }
+        }
+    }
+
+    private suspend fun fetchRoadRouteMulti(waypoints: List<RoutePoint>): List<RoutePoint> {
+        if (waypoints.size < 2) return waypoints
+        val coordsString = waypoints.joinToString(";") { "${it.lng},${it.lat}" }
+        val urlString = "https://router.project-osrm.org/route/v1/driving/$coordsString?overview=full&geometries=geojson"
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val url = java.net.URL(urlString)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                if (connection.responseCode == 200) {
+                    val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                    val json = org.json.JSONObject(responseText)
+                    val code = json.optString("code")
+                    if (code == "Ok") {
+                        val routes = json.optJSONArray("routes")
+                        if (routes != null && routes.length() > 0) {
+                            val routeObj = routes.getJSONObject(0)
+                            val geometry = routeObj.getJSONObject("geometry")
+                            val coordinates = geometry.getJSONArray("coordinates")
+                            val roadPoints = mutableListOf<RoutePoint>()
+                            for (i in 0 until coordinates.length()) {
+                                val coord = coordinates.getJSONArray(i)
+                                val lng = coord.getDouble(0)
+                                val lat = coord.getDouble(1)
+                                roadPoints.add(RoutePoint(lat, lng))
+                            }
+                            return@withContext roadPoints
+                        }
+                    }
+                }
+                waypoints
+            } catch (e: Exception) {
+                android.util.Log.e("RoadTrackerViewModel", "Error routing multi waypoints", e)
+                waypoints
+            }
+        }
     }
 
     fun deleteRoute(id: String) {
@@ -252,6 +491,7 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
             if (_selectedRoute.value?.id == id) {
                 _selectedRoute.value = null
             }
+            triggerSyncPush()
         }
     }
 
@@ -265,6 +505,91 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
 
     fun clearMapCenterTrigger() {
         _mapCenter.value = null
+    }
+
+    private var searchJob: Job? = null
+
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+        if (query.trim().length < 2) {
+            _searchResults.value = emptyList()
+            searchJob?.cancel()
+            return
+        }
+
+        searchJob?.cancel()
+        searchJob = viewModelScope.launch {
+            delay(500) // Debounce search
+            _isSearching.value = true
+            try {
+                val results = performAddressSearch(query)
+                _searchResults.value = results
+            } catch (e: Exception) {
+                _searchResults.value = emptyList()
+            } finally {
+                _isSearching.value = false
+            }
+        }
+    }
+
+    private suspend fun performAddressSearch(query: String): List<SearchResult> {
+        val encodedQuery = java.net.URLEncoder.encode(query, "UTF-8")
+        val urlString = "https://nominatim.openstreetmap.org/search?format=json&q=$encodedQuery&limit=8&addressdetails=1"
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val url = java.net.URL(urlString)
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                connection.setRequestProperty("User-Agent", "RoadTracker/1.0 (orestevangel@gmail.com)")
+                
+                if (connection.responseCode == 200) {
+                    val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                    val jsonArray = org.json.JSONArray(responseText)
+                    val results = mutableListOf<SearchResult>()
+                    for (i in 0 until jsonArray.length()) {
+                        val item = jsonArray.getJSONObject(i)
+                        val displayName = item.optString("display_name", "")
+                        val lat = item.optDouble("lat", 0.0)
+                        val lon = item.optDouble("lon", 0.0)
+                        
+                        val parts = displayName.split(",")
+                        val nameStr = parts.firstOrNull()?.trim() ?: displayName
+                        val descStr = if (parts.size > 1) {
+                            parts.drop(1).joinToString(",").trim()
+                        } else {
+                            ""
+                        }
+                        
+                        results.add(
+                            SearchResult(
+                                name = nameStr,
+                                description = descStr,
+                                lat = lat,
+                                lng = lon
+                            )
+                        )
+                    }
+                    return@withContext results
+                }
+                emptyList()
+            } catch (e: Exception) {
+                android.util.Log.e("RoadTrackerViewModel", "Error searching address", e)
+                emptyList()
+            }
+        }
+    }
+
+    fun selectSearchResult(result: SearchResult) {
+        _searchMarker.value = result
+        _mapCenter.value = RoutePoint(result.lat, result.lng)
+        _searchQuery.value = ""
+        _searchResults.value = emptyList()
+    }
+
+    fun clearSearchMarker() {
+        _searchMarker.value = null
     }
 
     fun importGpx(gpxText: String, customName: String? = null): String {
@@ -305,6 +630,7 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
 
         viewModelScope.launch {
             repository.insert(route)
+            triggerSyncPush()
         }
 
         return "Successfully imported route: $name (${String.format(Locale.US, "%.2f", distance)} km)"
@@ -375,11 +701,14 @@ class RoadTrackerViewModel(private val repository: RouteRepository) : ViewModel(
     }
 }
 
-class RoadTrackerViewModelFactory(private val repository: RouteRepository) : ViewModelProvider.Factory {
+class RoadTrackerViewModelFactory(
+    private val repository: RouteRepository,
+    private val context: Context
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(RoadTrackerViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return RoadTrackerViewModel(repository) as T
+            return RoadTrackerViewModel(repository, context) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

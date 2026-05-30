@@ -50,9 +50,11 @@ import com.example.data.AppDatabase
 import com.example.data.Route
 import com.example.data.RoutePoint
 import com.example.data.RouteRepository
+import com.example.data.SearchResult
 import com.example.ui.LeafletMapView
 import com.example.ui.RoadTrackerViewModel
 import com.example.ui.RoadTrackerViewModelFactory
+import com.example.ui.SavedRoutesPage
 import com.example.ui.theme.*
 import com.google.android.gms.location.*
 import kotlinx.coroutines.flow.collectLatest
@@ -82,7 +84,7 @@ class MainActivity : ComponentActivity() {
 
         val database = AppDatabase.getDatabase(this)
         val repository = RouteRepository(database.routeDao())
-        viewModel = ViewModelProvider(this, RoadTrackerViewModelFactory(repository))[RoadTrackerViewModel::class.java]
+        viewModel = ViewModelProvider(this, RoadTrackerViewModelFactory(repository, this))[RoadTrackerViewModel::class.java]
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
@@ -171,6 +173,15 @@ fun RoadTrackerApp(
     val selectedRoute by viewModel.selectedRoute.collectAsStateWithLifecycle()
     val currentSpeedKmh by viewModel.currentSpeedKmh.collectAsStateWithLifecycle()
 
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val isSearching by viewModel.isSearching.collectAsStateWithLifecycle()
+    val searchMarker by viewModel.searchMarker.collectAsStateWithLifecycle()
+
+    val vaultId by viewModel.vaultId.collectAsStateWithLifecycle()
+    val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
+    var showSyncDialog by remember { mutableStateOf(false) }
+
     // Trigger Permission Launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
@@ -240,6 +251,7 @@ fun RoadTrackerApp(
     
     // Bottom Sheet Expansion State
     var isSheetExpanded by remember { mutableStateOf(false) }
+    var showRoutesPage by remember { mutableStateOf(false) }
 
     // Document picker for GPX files
     val gpxPickerLauncher = rememberLauncherForActivityResult(
@@ -326,10 +338,17 @@ fun RoadTrackerApp(
                             .background(GeometricBorder)
                     )
 
-                    // Tracked Routes Count Column
+                    // Tracked Routes Count Column (Clickable to open dedicated fuller journal tracks page)
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable {
+                                showRoutesPage = true
+                            }
+                            .padding(vertical = 4.dp)
+                            .testTag("routes_stats_column")
                     ) {
                         Text(
                             text = "ROUTES",
@@ -430,6 +449,222 @@ fun RoadTrackerApp(
                         .padding(14.dp)
                         .align(Alignment.TopCenter)
                 ) {
+                    // Majestic Floating Search Bar (Google Maps style)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .testTag("address_search_card"),
+                        colors = CardDefaults.cardColors(
+                            containerColor = GlassyOverlay
+                        ),
+                        border = BorderStroke(1.5.dp, GeometricBorder),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(6.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(48.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search Address",
+                                    tint = ElectricCyan,
+                                    modifier = Modifier.padding(start = 12.dp, end = 8.dp).size(20.dp)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .fillMaxHeight(),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    if (searchQuery.isEmpty()) {
+                                        Text(
+                                            text = "Search address, city, highway...",
+                                            color = TextMuted,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                    androidx.compose.foundation.text.BasicTextField(
+                                        value = searchQuery,
+                                        onValueChange = { viewModel.updateSearchQuery(it) },
+                                        textStyle = androidx.compose.ui.text.TextStyle(
+                                            color = Color.White,
+                                            fontSize = 14.sp
+                                        ),
+                                        cursorBrush = androidx.compose.ui.graphics.SolidColor(ElectricCyan),
+                                        modifier = Modifier.fillMaxWidth().testTag("address_search_input"),
+                                        singleLine = true
+                                    )
+                                }
+                                if (isSearching) {
+                                    CircularProgressIndicator(
+                                        color = ElectricCyan,
+                                        modifier = Modifier.size(18.dp).padding(end = 12.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else if (searchQuery.isNotEmpty()) {
+                                    IconButton(
+                                        onClick = { viewModel.updateSearchQuery("") },
+                                        modifier = Modifier.size(32.dp).testTag("clear_search_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear Search",
+                                            tint = TextMuted,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Show live suggestions
+                            if (searchResults.isNotEmpty()) {
+                                Divider(color = GeometricBorder, modifier = Modifier.padding(vertical = 4.dp))
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 200.dp)
+                                ) {
+                                    items(searchResults) { result ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable {
+                                                    viewModel.selectSearchResult(result)
+                                                }
+                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Place,
+                                                contentDescription = "Place result",
+                                                tint = CockpitOrange,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = result.name,
+                                                    color = Color.White,
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                if (result.description.isNotEmpty()) {
+                                                    Text(
+                                                        text = result.description,
+                                                        color = TextSilver.copy(alpha = 0.7f),
+                                                        fontSize = 11.sp,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // If a search marker is selected, show a beautiful "Selected Pin HUD" with options (e.g. Center, Add node if manual, Clear)
+                    AnimatedVisibility(
+                        visible = searchMarker != null,
+                        enter = expandVertically() + fadeIn(),
+                        exit = shrinkVertically() + fadeOut()
+                    ) {
+                        searchMarker?.let { marker ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp)
+                                    .testTag("selected_pin_card"),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = GlassyOverlay
+                                ),
+                                border = BorderStroke(1.5.dp, CockpitOrange.copy(alpha = 0.8f)),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "PINNED LOCATION",
+                                            fontSize = 9.sp,
+                                            color = CockpitOrange,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.sp
+                                        )
+                                        Text(
+                                            text = marker.name,
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        if (marker.description.isNotEmpty()) {
+                                            Text(
+                                                text = marker.description,
+                                                color = TextSilver.copy(alpha = 0.7f),
+                                                fontSize = 11.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    
+                                    // Action to add it as coordinate node if we are in design mode!
+                                    if (isDrawingMode) {
+                                        IconButton(
+                                            onClick = {
+                                                viewModel.addDrawingPoint(com.example.data.RoutePoint(marker.lat, marker.lng))
+                                                Toast.makeText(context, "Added waypoint to design path", Toast.LENGTH_SHORT).show()
+                                            },
+                                            colors = IconButtonDefaults.iconButtonColors(
+                                                containerColor = CockpitOrange,
+                                                contentColor = DeepDarkBackground
+                                            ),
+                                            modifier = Modifier.size(36.dp).testTag("add_pin_to_drawing")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Add,
+                                                contentDescription = "Add node to drawing",
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                    }
+                                    
+                                    IconButton(
+                                        onClick = { viewModel.clearSearchMarker() },
+                                        colors = IconButtonDefaults.iconButtonColors(
+                                            containerColor = SlateCockpitSurface,
+                                            contentColor = Color.White
+                                        ),
+                                        modifier = Modifier.size(36.dp).testTag("clear_pin_button")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Dismiss Pin",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // Active GPS Recording HUD Overlay
                     AnimatedVisibility(
                         visible = isTracking,
@@ -599,6 +834,48 @@ fun RoadTrackerApp(
                         Icon(
                             imageVector = if (isSheetExpanded) Icons.Default.Book else Icons.Default.History,
                             contentDescription = "Ride Journal Panel",
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    // Cloud Sync settings button
+                    FloatingActionButton(
+                        onClick = {
+                            showSyncDialog = true
+                        },
+                        containerColor = when (syncStatus) {
+                            "synced" -> NeonGreen.copy(alpha = 0.15f)
+                            "syncing" -> ElectricCyan.copy(alpha = 0.15f)
+                            "failed" -> NeonPink.copy(alpha = 0.15f)
+                            else -> SlateCockpitSurface
+                        },
+                        contentColor = when (syncStatus) {
+                            "synced" -> NeonGreen
+                            "syncing" -> ElectricCyan
+                            "failed" -> NeonPink
+                            else -> Color.White
+                        },
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.size(48.dp)
+                            .border(
+                                1.dp,
+                                when (syncStatus) {
+                                    "synced" -> NeonGreen.copy(alpha = 0.5f)
+                                    "syncing" -> ElectricCyan.copy(alpha = 0.5f)
+                                    "failed" -> NeonPink.copy(alpha = 0.5f)
+                                    else -> Color.Transparent
+                                },
+                                RoundedCornerShape(16.dp)
+                            )
+                    ) {
+                        Icon(
+                            imageVector = when (syncStatus) {
+                                "synced" -> Icons.Default.CloudDone
+                                "syncing" -> Icons.Default.Sync
+                                "failed" -> Icons.Default.CloudQueue
+                                else -> Icons.Default.Cloud
+                            },
+                            contentDescription = "Cloud Storage Sync",
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -1062,6 +1339,31 @@ fun RoadTrackerApp(
         }
     }
 
+    // Full Screen Overlay Page showing all saved routes (opened by clicking ROUTES stat)
+    AnimatedVisibility(
+        visible = showRoutesPage,
+        enter = slideInHorizontally(initialOffsetX = { it }) + fadeIn(),
+        exit = slideOutHorizontally(targetOffsetX = { it }) + fadeOut(),
+        modifier = Modifier.fillMaxSize()
+    ) {
+        SavedRoutesPage(
+            routes = routes,
+            selectedRoute = selectedRoute,
+            onBack = { showRoutesPage = false },
+            onSelectRoute = { route ->
+                viewModel.selectRoute(route)
+                showRoutesPage = false
+            },
+            onDeleteRoute = { route ->
+                pendingRouteForDeletion = route
+            },
+            exportRouteToGpx = { viewModel.exportRouteToGpx(it) },
+            exportRouteToCsv = { viewModel.exportRouteToCsvWithTimestamps(it) },
+            exportAllRoutesToJson = { viewModel.exportAllRoutesToJson(it) },
+            importGpx = { viewModel.importGpx(it) }
+        )
+    }
+
     // Modal: Save Recorded Ride Name dialog
     if (showSaveDialog) {
         AlertDialog(
@@ -1235,6 +1537,168 @@ fun RoadTrackerApp(
                     Text("YES, DELETE", fontWeight = FontWeight.Bold)
                 }
             }
+        )
+    }
+
+    // Modal: Cloud Backend Sync Panel
+    if (showSyncDialog) {
+        var tempVaultId by remember { mutableStateOf(vaultId) }
+        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+        
+        AlertDialog(
+            onDismissRequest = { showSyncDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Cloud,
+                        contentDescription = "Cloud Icon",
+                        tint = ElectricCyan,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "CLOUD SYNC BACKEND",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        letterSpacing = 1.sp
+                    )
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Your routes are stored safely locally. Connect a Cloud Vault ID below to synchronize, backup, and restore your tracks across restarts and reinstalls.",
+                        fontSize = 12.sp,
+                        color = TextSilver,
+                        lineHeight = 16.sp
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Sync Status Badge
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(DeepDarkBackground)
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = "STATUS:",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextMuted,
+                            letterSpacing = 0.5.sp
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        
+                        val statusText = when (syncStatus) {
+                            "synced" -> "CONNECTED & SYNCED"
+                            "syncing" -> "SYNCING..."
+                            "failed" -> "SYNC FAILED / OFFLINE"
+                            else -> "IDLE"
+                        }
+                        val statusColor = when (syncStatus) {
+                            "synced" -> NeonGreen
+                            "syncing" -> ElectricCyan
+                            "failed" -> NeonPink
+                            else -> TextMuted
+                        }
+                        
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(statusColor)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = statusText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = statusColor
+                        )
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // Vault ID text field with copy/paste
+                    Text(
+                        text = "VAULT ID CODE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ElectricCyan,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    
+                    OutlinedTextField(
+                        value = tempVaultId,
+                        onValueChange = { tempVaultId = it },
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = Color.White
+                        ),
+                        singleLine = true,
+                        placeholder = { Text("Enter custom vault code", color = TextMuted) },
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(vaultId))
+                                Toast.makeText(context, "Copied Vault Code to clipboard!", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.CopyAll,
+                                    contentDescription = "Copy code",
+                                    tint = ElectricCyan,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        },
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = ElectricCyan,
+                            unfocusedBorderColor = GeometricBorder,
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedContainerColor = DeepDarkBackground,
+                            unfocusedContainerColor = DeepDarkBackground
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "💡 Tap the copy icon to backup your vault code. Paste or type an existing code to recover your saved routes instantly.",
+                        fontSize = 10.sp,
+                        color = TextMuted,
+                        lineHeight = 14.sp
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.updateVaultId(tempVaultId)
+                        showSyncDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ElectricCyan,
+                        contentColor = DeepDarkBackground
+                    )
+                ) {
+                    Text("CONNECT & SYNC", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showSyncDialog = false }
+                ) {
+                    Text("CLOSE", color = TextMuted)
+                }
+            },
+            containerColor = SlateCockpitSurface,
+            tonalElevation = 6.dp
         )
     }
 }
