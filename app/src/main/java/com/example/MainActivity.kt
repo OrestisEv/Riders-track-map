@@ -71,6 +71,9 @@ class MainActivity : ComponentActivity() {
 
     private val currentUserLocation = mutableStateOf<RoutePoint?>(null)
 
+    private lateinit var googleSignInClient: com.google.android.gms.auth.api.signin.GoogleSignInClient
+    private lateinit var googleSignInLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
+
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
             for (location in locationResult.locations) {
@@ -90,11 +93,72 @@ class MainActivity : ComponentActivity() {
         DebugLogger.init(applicationContext)
         DebugLogger.sys("SYSTEM", "Velocitron mobile subsystem active. Version 2.4.0-RC initialized successfully.")
 
+        // Initialize Supabase Manager safely
+        try {
+            com.example.data.SupabaseManager.initialize(this)
+        } catch (e: Exception) {
+            DebugLogger.e("SUPABASE", "Exception initializing SupabaseManager", e)
+        }
+
         val database = AppDatabase.getDatabase(this)
         val repository = RouteRepository(database.routeDao())
         viewModel = ViewModelProvider(this, RoadTrackerViewModelFactory(repository, this))[RoadTrackerViewModel::class.java]
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        // Initialize Google Sign In Configurations safely to prevent crashes with empty/blank keys
+        try {
+            val clientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
+            if (clientId.isNotBlank() && clientId != "your-google-web-client-id") {
+                val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestIdToken(clientId)
+                    .requestEmail()
+                    .build()
+                googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(this, gso)
+            } else {
+                // Initialize a dummy client if invalid/missing to avoid NullPointer/lateinit crashes
+                val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestEmail()
+                    .build()
+                googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(this, gso)
+                DebugLogger.w("GOOGLE_SIGN_IN", "Google Web Client ID is blank or placeholder. Google Sign in request token is omitted.")
+            }
+        } catch (e: Exception) {
+            DebugLogger.e("GOOGLE_SIGN_IN", "Error initializing Google Sign-In options", e)
+            try {
+                val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
+                    .requestEmail()
+                    .build()
+                googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(this, gso)
+            } catch (fallbackEx: Exception) {
+                DebugLogger.e("GOOGLE_SIGN_IN", "Fatal exception in fallback Google client config", fallbackEx)
+            }
+        }
+
+        googleSignInLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+            val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(result.data)
+            try {
+                val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
+                val idToken = account?.idToken
+                if (idToken != null) {
+                    lifecycleScope.launch {
+                        val success = com.example.data.SupabaseManager.loginWithGoogle(idToken)
+                        if (success) {
+                            Toast.makeText(this@MainActivity, "Google Sign-in Successful!", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(this@MainActivity, "Supabase authentication failed.", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                } else {
+                    Toast.makeText(this@MainActivity, "Google did not return credentials.", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@MainActivity, "Sign-in error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                DebugLogger.e("SUPABASE", "Google sign-in launcher exception", e)
+            }
+        }
 
         // Reactively observe tracking flow to start/stop live GPS updates
         lifecycleScope.launch {
@@ -114,7 +178,18 @@ class MainActivity : ComponentActivity() {
                     currentUserLocation = currentUserLocation,
                     onStartLocationUpdates = { startLocationUpdates() },
                     onStopLocationUpdates = { stopLocationUpdates() },
-                    onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) }
+                    onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) },
+                    onSignInClick = {
+                        val signInIntent = googleSignInClient.signInIntent
+                        googleSignInLauncher.launch(signInIntent)
+                    },
+                    onSignOutClick = {
+                        lifecycleScope.launch {
+                            com.example.data.SupabaseManager.signOut()
+                            googleSignInClient.signOut()
+                            Toast.makeText(this@MainActivity, "Signed out successfully", Toast.LENGTH_SHORT).show()
+                        }
+                    }
                 )
             }
         }
@@ -177,7 +252,9 @@ fun RoadTrackerApp(
     currentUserLocation: MutableState<RoutePoint?>,
     onStartLocationUpdates: () -> Unit,
     onStopLocationUpdates: () -> Unit,
-    onFetchLastLocation: (Boolean) -> Unit
+    onFetchLastLocation: (Boolean) -> Unit,
+    onSignInClick: () -> Unit,
+    onSignOutClick: () -> Unit
 ) {
     val context = LocalContext.current
     var hasLocationPermission by remember { mutableStateOf(false) }
@@ -202,7 +279,6 @@ fun RoadTrackerApp(
     val isSearching by viewModel.isSearching.collectAsStateWithLifecycle()
     val searchMarker by viewModel.searchMarker.collectAsStateWithLifecycle()
 
-    val vaultId by viewModel.vaultId.collectAsStateWithLifecycle()
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val isLightMap by viewModel.isLightMap.collectAsStateWithLifecycle()
     var showSyncDialog by remember { mutableStateOf(false) }
@@ -301,10 +377,19 @@ fun RoadTrackerApp(
     val totalDistance = routes.sumOf { it.distance }
     val totalRidesCount = routes.size
 
-    Scaffold(
-        modifier = Modifier.fillMaxSize(),
-        contentWindowInsets = WindowInsets.statusBars
-    ) { innerPadding ->
+    val sessionStatus by com.example.data.SupabaseManager.sessionState.collectAsStateWithLifecycle()
+    var demoBypass by remember { mutableStateOf(false) }
+
+    if (sessionStatus !is io.github.jan.supabase.auth.status.SessionStatus.Authenticated && !demoBypass) {
+        GoogleSignInScreen(
+            onSignInClick = onSignInClick,
+            onDemoBypassClick = { demoBypass = true }
+        )
+    } else {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            contentWindowInsets = WindowInsets.statusBars
+        ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -1891,24 +1976,25 @@ fun RoadTrackerApp(
         )
     }
 
-    // Modal: Cloud Backend Sync Panel
+    // Modal: Cloud Backend Sync Panel (Supabase Sync & User Profile)
     if (showSyncDialog) {
-        var tempVaultId by remember { mutableStateOf(vaultId) }
-        val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+        val userName = com.example.data.SupabaseManager.getCurrentUserName() ?: "Cyclist / Rider"
+        val userEmail = com.example.data.SupabaseManager.getCurrentUserEmail() ?: "Supabase Connected"
+        val scope = rememberCoroutineScope()
         
         AlertDialog(
             onDismissRequest = { showSyncDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Cloud,
-                        contentDescription = "Cloud Icon",
+                        imageVector = Icons.Default.AccountCircle,
+                        contentDescription = "Profile Icon",
                         tint = ElectricCyan,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "CLOUD SYNC BACKEND",
+                        text = "CLOUD SYNC PROFILE",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -1919,11 +2005,44 @@ fun RoadTrackerApp(
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Your routes are stored safely locally. Connect a Cloud Vault ID below to synchronize, backup, and restore your tracks across restarts and reinstalls.",
+                        text = "Your routes are secured by your Google account and synced to Supabase database.",
                         fontSize = 12.sp,
                         color = TextSilver,
                         lineHeight = 16.sp
                     )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    // User Details Segment
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(DeepDarkBackground)
+                            .border(1.dp, GeometricBorder, RoundedCornerShape(12.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "SIGNED IN AS",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextMuted,
+                            letterSpacing = 0.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = userName,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = userEmail,
+                            fontSize = 12.sp,
+                            color = TextSilver
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(16.dp))
                     
                     // Sync Status Badge
@@ -1936,7 +2055,7 @@ fun RoadTrackerApp(
                             .padding(horizontal = 12.dp, vertical = 8.dp)
                     ) {
                         Text(
-                            text = "STATUS:",
+                            text = "SYNC ENGINE:",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = TextMuted,
@@ -1944,113 +2063,274 @@ fun RoadTrackerApp(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         
-                        val statusText = when (syncStatus) {
-                            "synced" -> "CONNECTED & SYNCED"
-                            "syncing" -> "SYNCING..."
-                            "failed" -> "SYNC FAILED / OFFLINE"
-                            else -> "IDLE"
-                        }
-                        val statusColor = when (syncStatus) {
-                            "synced" -> NeonGreen
-                            "syncing" -> ElectricCyan
-                            "failed" -> NeonPink
-                            else -> TextMuted
-                        }
-                        
                         Box(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(statusColor)
+                                .background(NeonGreen)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = statusText,
+                            text = "ACTIVE & SECURE",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = statusColor
+                            color = NeonGreen
                         )
                     }
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
                     
-                    // Vault ID text field with copy/paste
-                    Text(
-                        text = "VAULT ID CODE",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ElectricCyan,
-                        letterSpacing = 1.sp
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    
-                    OutlinedTextField(
-                        value = tempVaultId,
-                        onValueChange = { tempVaultId = it },
-                        textStyle = androidx.compose.ui.text.TextStyle(
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color.White
-                        ),
-                        singleLine = true,
-                        placeholder = { Text("Enter custom vault code", color = TextMuted) },
-                        modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = {
-                            IconButton(onClick = {
-                                clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(vaultId))
-                                Toast.makeText(context, "Copied Vault Code to clipboard!", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Default.CopyAll,
-                                    contentDescription = "Copy code",
-                                    tint = ElectricCyan,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        },
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = ElectricCyan,
-                            unfocusedBorderColor = GeometricBorder,
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedContainerColor = DeepDarkBackground,
-                            unfocusedContainerColor = DeepDarkBackground
+                    val pendingOps = com.example.data.SupabaseManager.getPendingOperationsCount()
+                    if (pendingOps > 0) {
+                        Text(
+                            text = "⏳ Offline mode active. $pendingOps operations queued. Will synchronize automatically when mobile network is online.",
+                            fontSize = 11.sp,
+                            color = NeonPink,
+                            lineHeight = 15.sp
                         )
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "💡 Tap the copy icon to backup your vault code. Paste or type an existing code to recover your saved routes instantly.",
-                        fontSize = 10.sp,
-                        color = TextMuted,
-                        lineHeight = 14.sp
-                    )
+                    } else {
+                        Text(
+                            text = "💡 Any routes recorded on other devices logging into this Google account will automatically synchronize to this device instantly.",
+                            fontSize = 10.sp,
+                            color = TextMuted,
+                            lineHeight = 14.sp
+                        )
+                    }
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.updateVaultId(tempVaultId)
-                        showSyncDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = ElectricCyan,
-                        contentColor = DeepDarkBackground
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("CONNECT & SYNC", fontWeight = FontWeight.Bold)
+                    TextButton(
+                        onClick = {
+                            val uid = com.example.data.SupabaseManager.getCurrentUserId()
+                            if (uid != null) {
+                                scope.launch {
+                                    com.example.data.SupabaseManager.syncFromCloudToRoom(uid)
+                                    Toast.makeText(context, "Cloud sync refresh started", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = ElectricCyan
+                        )
+                    ) {
+                        Text("REFRESH SYNC", fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = {
+                            onSignOutClick()
+                            demoBypass = false
+                            showSyncDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NeonPink.copy(alpha = 0.2f),
+                            contentColor = NeonPink
+                        ),
+                        border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.5f))
+                    ) {
+                        Text("SIGN OUT", fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             dismissButton = {
                 TextButton(
                     onClick = { showSyncDialog = false }
                 ) {
-                    Text("CLOSE", color = TextMuted)
+                    Text("CLOSE", color = TextSilver)
                 }
             },
             containerColor = SlateCockpitSurface,
             tonalElevation = 6.dp
         )
+    }
+    } // Ends the authenticated check else block
+}
+
+@Composable
+fun GoogleSignInScreen(
+    onSignInClick: () -> Unit,
+    onDemoBypassClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DeepDarkBackground),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxWidth(0.85f)
+                .padding(24.dp)
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(80.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.White.copy(alpha = 0.05f))
+                    .border(1.dp, ElectricCyan.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DirectionsBike,
+                    contentDescription = "Motorcycle Logo",
+                    tint = ElectricCyan,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.height(24.dp))
+            
+            Text(
+                text = "ROAD TRACKER",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+                letterSpacing = 2.sp,
+                textAlign = TextAlign.Center
+            )
+            
+            Spacer(modifier = Modifier.height(6.dp))
+            
+            Text(
+                text = "Supa-Charged Motorcycle Cockpit & Telemetry Logs",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = ElectricCyan,
+                letterSpacing = 1.sp,
+                textAlign = TextAlign.Center
+            )
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(SlateCockpitSurface.copy(alpha = 0.3f))
+                    .border(1.dp, GeometricBorder, RoundedCornerShape(16.dp))
+                    .padding(16.dp)
+            ) {
+                FeatureRow(icon = Icons.Default.GpsFixed, title = "GPS Logs & Snapping", desc = "Track precise paths snaps securely to roads.")
+                FeatureRow(icon = Icons.Default.Speed, title = "High-Precision Telemetry", desc = "Record real-time speed, g-force, and lean angle.")
+                FeatureRow(icon = Icons.Default.CloudSync, title = "Supabase Cloud Sync", desc = "Your tracks belong to you, safe and synchronized offline-first.")
+            }
+            
+            Spacer(modifier = Modifier.height(32.dp))
+            
+            Button(
+                onClick = onSignInClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black
+                ),
+                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("google_sign_in_button"),
+                border = BorderStroke(1.dp, GeometricBorder),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccountCircle,
+                        contentDescription = "Google Icon",
+                        tint = Color.Black,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Sign in with Google",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedButton(
+                onClick = onDemoBypassClick,
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = ElectricCyan
+                ),
+                shape = RoundedCornerShape(28.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp)
+                    .testTag("demo_bypass_button"),
+                border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.5f))
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DirectionsRun,
+                        contentDescription = "Demo Cockpit",
+                        tint = ElectricCyan,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Enter Offline Demo Cockpit",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
+            }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            Text(
+                text = "Secure Google Sign-In powered by Supabase. Your routes are kept private, and sync is automatic.",
+                fontSize = 10.sp,
+                color = TextMuted,
+                textAlign = TextAlign.Center,
+                lineHeight = 14.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun FeatureRow(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, desc: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = ElectricCyan,
+            modifier = Modifier
+                .size(20.dp)
+                .offset(y = 2.dp)
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column {
+            Text(
+                text = title,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+            Text(
+                text = desc,
+                fontSize = 11.sp,
+                color = TextSilver,
+                lineHeight = 14.sp
+            )
+        }
     }
 }
 

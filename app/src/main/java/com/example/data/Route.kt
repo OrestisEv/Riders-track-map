@@ -91,6 +91,9 @@ interface RouteDao {
 
     @Query("DELETE FROM routes WHERE id = :id")
     suspend fun deleteRouteById(id: String)
+
+    @Query("SELECT * FROM routes WHERE id = :id LIMIT 1")
+    suspend fun getRouteById(id: String): Route?
 }
 
 @Database(entities = [Route::class], version = 2, exportSchema = false)

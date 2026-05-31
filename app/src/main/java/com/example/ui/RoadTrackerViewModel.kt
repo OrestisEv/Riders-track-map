@@ -34,11 +34,16 @@ class RoadTrackerViewModel(
     // Cloud Backend Sync System
     private val sharedPrefs = context.getSharedPreferences("roadtracker_cloud_sync", Context.MODE_PRIVATE)
 
-    private val _vaultId = MutableStateFlow(sharedPrefs.getString("vault_id", "") ?: "")
-    val vaultId: StateFlow<String> = _vaultId.asStateFlow()
-
-    private val _syncStatus = MutableStateFlow("idle") // "idle", "syncing", "synced", "failed"
-    val syncStatus: StateFlow<String> = _syncStatus.asStateFlow()
+    // Bound to Supabase connection state automatically
+    val syncStatus: StateFlow<String> = kotlinx.coroutines.flow.flow {
+        com.example.data.SupabaseManager.sessionState.collect { status ->
+            if (status is io.github.jan.supabase.auth.status.SessionStatus.Authenticated) {
+                emit("synced")
+            } else {
+                emit("failed")
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "idle")
 
     private val _isLightMap = MutableStateFlow(sharedPrefs.getBoolean("light_map_theme", false))
     val isLightMap: StateFlow<Boolean> = _isLightMap.asStateFlow()
@@ -50,146 +55,7 @@ class RoadTrackerViewModel(
     }
 
     init {
-        if (_vaultId.value.isEmpty()) {
-            val randomId = "road_vault_" + (1000..9999).random() + "_" + (10..99).random()
-            _vaultId.value = randomId
-            sharedPrefs.edit().putString("vault_id", randomId).apply()
-        }
-        syncWithBackend()
-    }
-
-    fun updateVaultId(newId: String) {
-        val cleanId = newId.trim().lowercase().replace(Regex("[^a-z0-9_-]"), "")
-        if (cleanId.isNotEmpty()) {
-            _vaultId.value = cleanId
-            sharedPrefs.edit().putString("vault_id", cleanId).apply()
-            syncWithBackend()
-        }
-    }
-
-    fun syncWithBackend() {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            _syncStatus.value = "syncing"
-            val currentVaultId = _vaultId.value
-            if (currentVaultId.isEmpty()) {
-                _syncStatus.value = "idle"
-                return@launch
-            }
-            DebugLogger.sys("SYSTEM", "Starting two-way synchronization with cloud vault ID: '$currentVaultId'")
-
-            try {
-                // Wait briefly for allRoutes to initialize from Room DB
-                var localRoutes = allRoutes.value
-                var attempts = 0
-                while (localRoutes.isEmpty() && attempts < 20) {
-                    delay(100)
-                    localRoutes = allRoutes.value
-                    attempts++
-                }
-
-                DebugLogger.i("SYSTEM", "Fetching remote route logs for vault ID: '$currentVaultId'")
-                val cloudJson = fetchFromCloud(currentVaultId)
-                val cloudRoutes = if (cloudJson != null) JsonHelper.jsonToRoutes(cloudJson) else null
-
-                val merged = mutableListOf<Route>()
-                merged.addAll(localRoutes)
-
-                var newSyncedCount = 0
-                if (cloudRoutes != null) {
-                    DebugLogger.i("SYSTEM", "Retrieved ${cloudRoutes.size} routes from remote cloud repository.")
-                    for (cloudRoute in cloudRoutes) {
-                        val existsLocally = localRoutes.any { it.id == cloudRoute.id }
-                        if (!existsLocally) {
-                            try {
-                                repository.insert(cloudRoute)
-                                merged.add(cloudRoute)
-                                newSyncedCount++
-                                DebugLogger.sys("DATABASE", "Downloaded and merged new remote route: '${cloudRoute.name}'")
-                            } catch (e: Exception) {
-                                DebugLogger.e("DATABASE", "Failed to insert downloaded cloud route: '${cloudRoute.name}'", e)
-                            }
-                        }
-                    }
-                } else {
-                    DebugLogger.i("SYSTEM", "No remote routes found in vault '$currentVaultId' (or network offline).")
-                }
-
-                _syncStatus.value = "syncing"
-                val success = pushToCloud(currentVaultId, merged)
-                if (success) {
-                    _syncStatus.value = "synced"
-                    DebugLogger.sys("SYSTEM", "Cloud synchronization successful! Sync session closed. Merged local changes pushed.")
-                } else {
-                    _syncStatus.value = "failed"
-                    DebugLogger.w("SYSTEM", "Cloud push failed. Sync state: non-aligned.")
-                }
-            } catch (e: Exception) {
-                DebugLogger.e("SYSTEM", "Exception occured during background cloud synchronization", e)
-                _syncStatus.value = "failed"
-            }
-        }
-    }
-
-    fun triggerSyncPush() {
-        val currentVaultId = _vaultId.value
-        if (currentVaultId.isEmpty()) return
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            _syncStatus.value = "syncing"
-            DebugLogger.i("SYSTEM", "Triggering local route changes push to vault '$currentVaultId'...")
-            delay(600) // allow internal state flows to catch up
-            val currentRoutes = allRoutes.value
-            val success = pushToCloud(currentVaultId, currentRoutes)
-            if (success) {
-                _syncStatus.value = "synced"
-                DebugLogger.sys("SYSTEM", "Route modifications successfully synced with cloud vault.")
-            } else {
-                _syncStatus.value = "failed"
-                DebugLogger.e("SYSTEM", "Failed to sync local configuration changes with remote cloud vault.")
-            }
-        }
-    }
-
-    private fun fetchFromCloud(vaultId: String): String? {
-        val urlString = "https://kvdb.io/$vaultId/routes"
-        try {
-            val url = java.net.URL(urlString)
-            val connection = url.openConnection() as java.net.HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            if (connection.responseCode == 200) {
-                return connection.inputStream.bufferedReader().use { it.readText() }
-            } else if (connection.responseCode == 404) {
-                return "[]"
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("RoadTrackerViewModel", "Error fetching from Cloud Vault", e)
-        }
-        return null
-    }
-
-    private fun pushToCloud(vaultId: String, routes: List<Route>): Boolean {
-        val urlString = "https://kvdb.io/$vaultId/routes"
-        try {
-            val url = java.net.URL(urlString)
-            val connection = url.openConnection() as java.net.HttpURLConnection
-            connection.requestMethod = "POST"
-            connection.doOutput = true
-            connection.connectTimeout = 5000
-            connection.readTimeout = 5000
-            connection.setRequestProperty("Content-Type", "application/json")
-            
-            val json = JsonHelper.routesToJson(routes)
-            connection.outputStream.use { os ->
-                os.write(json.toByteArray(charset("UTF-8")))
-            }
-            if (connection.responseCode == 200 || connection.responseCode == 201) {
-                return true
-            }
-        } catch (e: Exception) {
-            android.util.Log.e("RoadTrackerViewModel", "Error pushing to Cloud Vault", e)
-        }
-        return false
+        // Safe placeholder
     }
 
     // Saved Routes from Room
@@ -643,8 +509,8 @@ class RoadTrackerViewModel(
         viewModelScope.launch {
             try {
                 repository.insert(route)
-                DebugLogger.sys("DATABASE", "Route '${route.name}' successfully committed to Room DB. Syncing with backend...")
-                triggerSyncPush()
+                DebugLogger.sys("DATABASE", "Route '${route.name}' successfully committed to Room DB. Syncing with Supabase...")
+                com.example.data.SupabaseManager.executeInsert(route)
             } catch (e: Exception) {
                 DebugLogger.e("DATABASE", "CRITICAL error occurred while saving tracking route: '${route.name}'", e)
             }
@@ -762,7 +628,7 @@ class RoadTrackerViewModel(
         viewModelScope.launch {
             try {
                 repository.insert(route)
-                triggerSyncPush()
+                com.example.data.SupabaseManager.executeInsert(route)
             } catch (e: Exception) {
                 DebugLogger.e("DATABASE", "CRITICAL error occurred while saving manual route: '${route.name}'", e)
             }
@@ -843,7 +709,7 @@ class RoadTrackerViewModel(
             if (_selectedRoute.value?.id == id) {
                 _selectedRoute.value = null
             }
-            triggerSyncPush()
+            com.example.data.SupabaseManager.executeDelete(id)
         }
     }
 
@@ -987,7 +853,7 @@ class RoadTrackerViewModel(
         viewModelScope.launch {
             try {
                 repository.insert(route)
-                triggerSyncPush()
+                com.example.data.SupabaseManager.executeInsert(route)
             } catch (e: Exception) {
                 DebugLogger.e("DATABASE", "CRITICAL error occurred while importing GPX route: '${route.name}'", e)
             }

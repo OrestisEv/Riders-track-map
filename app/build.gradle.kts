@@ -4,6 +4,7 @@ plugins {
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
   alias(libs.plugins.secrets)
+  alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -69,7 +70,21 @@ secrets {
 // This makes it easy to add them back in the future if needed.
 dependencies {
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform(libs.firebase.bom))
+  
+  // Supabase Platform & Client Libraries
+  implementation(platform(libs.supabase.bom))
+  implementation(libs.supabase.auth)
+  implementation(libs.supabase.postgrest)
+  implementation(libs.supabase.realtime)
+
+  // Ktor HTTP Client Engines
+  implementation(libs.ktor.client.core)
+  implementation(libs.ktor.client.okhttp)
+
+  // Kotlin Serialization & Play Services Sign-in
+  implementation(libs.kotlinx.serialization.json)
+  implementation(libs.play.services.auth)
+
   // implementation(libs.accompanist.permissions)
   implementation(libs.androidx.activity.compose)
   // implementation(libs.androidx.camera.camera2)
