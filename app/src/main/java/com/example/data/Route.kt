@@ -45,18 +45,39 @@ data class Route(
 )
 
 class Converters {
-    private val moshi = Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
-    private val listType = Types.newParameterizedType(List::class.java, RoutePoint::class.java)
-    private val adapter = moshi.adapter<List<RoutePoint>>(listType)
-
     @TypeConverter
     fun fromString(value: String?): List<RoutePoint>? {
-        return value?.let { adapter.fromJson(it) }
+        if (value.isNullOrEmpty()) return emptyList()
+        return try {
+            val jsonArray = org.json.JSONArray(value)
+            val list = mutableListOf<RoutePoint>()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(RoutePoint(obj.getDouble("lat"), obj.getDouble("lng")))
+            }
+            list
+        } catch (e: Exception) {
+            android.util.Log.e("Converters", "Failed parsing coordinates JSON structure", e)
+            emptyList()
+        }
     }
 
     @TypeConverter
     fun toString(list: List<RoutePoint>?): String? {
-        return list?.let { adapter.toJson(it) }
+        if (list == null) return null
+        return try {
+            val jsonArray = org.json.JSONArray()
+            for (point in list) {
+                val obj = org.json.JSONObject()
+                obj.put("lat", point.lat)
+                obj.put("lng", point.lng)
+                jsonArray.put(obj)
+            }
+            jsonArray.toString()
+        } catch (e: Exception) {
+            android.util.Log.e("Converters", "Failed serializing coordinates to JSON", e)
+            "[]"
+        }
     }
 }
 
@@ -81,6 +102,46 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
+        val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                try {
+                    db.execSQL("ALTER TABLE routes ADD COLUMN durationSeconds INTEGER NOT NULL DEFAULT 0")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Column durationSeconds may already exist: ${e.message}")
+                }
+                try {
+                    db.execSQL("ALTER TABLE routes ADD COLUMN maxSpeed REAL NOT NULL DEFAULT 0.0")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Column maxSpeed may already exist: ${e.message}")
+                }
+                try {
+                    db.execSQL("ALTER TABLE routes ADD COLUMN avgSpeed REAL NOT NULL DEFAULT 0.0")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Column avgSpeed may already exist: ${e.message}")
+                }
+                try {
+                    db.execSQL("ALTER TABLE routes ADD COLUMN maxLeanAngle REAL NOT NULL DEFAULT 0.0")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Column maxLeanAngle may already exist: ${e.message}")
+                }
+                try {
+                    db.execSQL("ALTER TABLE routes ADD COLUMN maxGForce REAL NOT NULL DEFAULT 0.0")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Column maxGForce may already exist: ${e.message}")
+                }
+                try {
+                    db.execSQL("ALTER TABLE routes ADD COLUMN elevationGain REAL NOT NULL DEFAULT 0.0")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Column elevationGain may already exist: ${e.message}")
+                }
+                try {
+                    db.execSQL("ALTER TABLE routes ADD COLUMN telemetryJson TEXT NOT NULL DEFAULT ''")
+                } catch (e: Exception) {
+                    android.util.Log.w("AppDatabase", "Column telemetryJson may already exist: ${e.message}")
+                }
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -88,6 +149,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "roadtracker_database"
                 )
+                .addMigrations(MIGRATION_1_2)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

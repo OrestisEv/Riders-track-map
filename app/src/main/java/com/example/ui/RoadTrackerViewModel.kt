@@ -13,6 +13,7 @@ import com.example.data.RoutePoint
 import com.example.data.RouteRepository
 import com.example.data.SearchResult
 import com.example.data.TelemetrySample
+import com.example.data.DebugLogger
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,6 +75,7 @@ class RoadTrackerViewModel(
                 _syncStatus.value = "idle"
                 return@launch
             }
+            DebugLogger.sys("SYSTEM", "Starting two-way synchronization with cloud vault ID: '$currentVaultId'")
 
             try {
                 // Wait briefly for allRoutes to initialize from Room DB
@@ -85,31 +87,44 @@ class RoadTrackerViewModel(
                     attempts++
                 }
 
+                DebugLogger.i("SYSTEM", "Fetching remote route logs for vault ID: '$currentVaultId'")
                 val cloudJson = fetchFromCloud(currentVaultId)
                 val cloudRoutes = if (cloudJson != null) JsonHelper.jsonToRoutes(cloudJson) else null
 
                 val merged = mutableListOf<Route>()
                 merged.addAll(localRoutes)
 
+                var newSyncedCount = 0
                 if (cloudRoutes != null) {
+                    DebugLogger.i("SYSTEM", "Retrieved ${cloudRoutes.size} routes from remote cloud repository.")
                     for (cloudRoute in cloudRoutes) {
                         val existsLocally = localRoutes.any { it.id == cloudRoute.id }
                         if (!existsLocally) {
-                            repository.insert(cloudRoute)
-                            merged.add(cloudRoute)
+                            try {
+                                repository.insert(cloudRoute)
+                                merged.add(cloudRoute)
+                                newSyncedCount++
+                                DebugLogger.sys("DATABASE", "Downloaded and merged new remote route: '${cloudRoute.name}'")
+                            } catch (e: Exception) {
+                                DebugLogger.e("DATABASE", "Failed to insert downloaded cloud route: '${cloudRoute.name}'", e)
+                            }
                         }
                     }
+                } else {
+                    DebugLogger.i("SYSTEM", "No remote routes found in vault '$currentVaultId' (or network offline).")
                 }
 
-                // If merged has new elements or sync started, push back to align cloud vault
+                _syncStatus.value = "syncing"
                 val success = pushToCloud(currentVaultId, merged)
                 if (success) {
                     _syncStatus.value = "synced"
+                    DebugLogger.sys("SYSTEM", "Cloud synchronization successful! Sync session closed. Merged local changes pushed.")
                 } else {
                     _syncStatus.value = "failed"
+                    DebugLogger.w("SYSTEM", "Cloud push failed. Sync state: non-aligned.")
                 }
             } catch (e: Exception) {
-                android.util.Log.e("RoadTrackerViewModel", "Sync with backend failed", e)
+                DebugLogger.e("SYSTEM", "Exception occured during background cloud synchronization", e)
                 _syncStatus.value = "failed"
             }
         }
@@ -120,13 +135,16 @@ class RoadTrackerViewModel(
         if (currentVaultId.isEmpty()) return
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             _syncStatus.value = "syncing"
+            DebugLogger.i("SYSTEM", "Triggering local route changes push to vault '$currentVaultId'...")
             delay(600) // allow internal state flows to catch up
             val currentRoutes = allRoutes.value
             val success = pushToCloud(currentVaultId, currentRoutes)
             if (success) {
                 _syncStatus.value = "synced"
+                DebugLogger.sys("SYSTEM", "Route modifications successfully synced with cloud vault.")
             } else {
                 _syncStatus.value = "failed"
+                DebugLogger.e("SYSTEM", "Failed to sync local configuration changes with remote cloud vault.")
             }
         }
     }
@@ -330,9 +348,14 @@ class RoadTrackerViewModel(
     }
 
     fun evaluatePowerSaver() {
+        val previousBlackout = _isMapBlackedOut.value
+        
         if (!_isPowerSaverMode.value || !_isTracking.value) {
             _isMapBlackedOut.value = false
             _blackoutReason.value = if (!_isTracking.value) "Not tracking" else "Power Saver Inactive"
+            if (previousBlackout) {
+                DebugLogger.sys("POWER", "Map blackout deactivated. Reason: ${_blackoutReason.value}")
+            }
             return
         }
 
@@ -349,6 +372,9 @@ class RoadTrackerViewModel(
         if (speed < 5.0) {
             _isMapBlackedOut.value = false
             _blackoutReason.value = "Woke up: Speed low (< 5 km/h)"
+            if (previousBlackout) {
+                DebugLogger.sys("POWER", "Map woke up automatically. Reason: ${_blackoutReason.value}")
+            }
             return
         }
 
@@ -356,6 +382,9 @@ class RoadTrackerViewModel(
         if (lean > 18.0) {
             _isMapBlackedOut.value = false
             _blackoutReason.value = "Woke up: Lean angle " + String.format(Locale.US, "%.1f", lean) + "°"
+            if (previousBlackout) {
+                DebugLogger.sys("POWER", "Map woke up automatically. Reason: ${_blackoutReason.value}")
+            }
             return
         }
 
@@ -363,6 +392,9 @@ class RoadTrackerViewModel(
         if (gForce > 1.35) {
             _isMapBlackedOut.value = false
             _blackoutReason.value = "Woke up: High Gforce " + String.format(Locale.US, "%.2f", gForce) + "G"
+            if (previousBlackout) {
+                DebugLogger.sys("POWER", "Map woke up automatically. Reason: ${_blackoutReason.value}")
+            }
             return
         }
 
@@ -375,6 +407,9 @@ class RoadTrackerViewModel(
             if (hasLargeDeviation) {
                 _isMapBlackedOut.value = false
                 _blackoutReason.value = "Woke up: Curve detected"
+                if (previousBlackout) {
+                    DebugLogger.sys("POWER", "Map woke up automatically. Reason: ${_blackoutReason.value}")
+                }
                 return
             }
         }
@@ -382,6 +417,9 @@ class RoadTrackerViewModel(
         // Target state satisfied! Screen turns black to save battery while riding straight.
         _isMapBlackedOut.value = true
         _blackoutReason.value = "Map Off: Riding Straight"
+        if (!previousBlackout) {
+            DebugLogger.sys("POWER", "Map blacking out to conserve battery. Reason: ${_blackoutReason.value}")
+        }
     }
 
     private val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
@@ -511,6 +549,7 @@ class RoadTrackerViewModel(
 
     fun startTracking() {
         if (_isTracking.value) return
+        DebugLogger.i("GPS", "User clicked Start Tracking. Resetting telemetry buffers.")
         _isDrawingMode.value = false // Mutually exclusive
         _isTracking.value = true
         _activeCoordinates.value = emptyList()
@@ -558,6 +597,7 @@ class RoadTrackerViewModel(
 
     fun stopAndSaveTracking(customName: String?): String? {
         if (!_isTracking.value) return null
+        DebugLogger.i("GPS", "Stopping active track logging. Points registered: ${_activeCoordinates.value.size}")
         _isTracking.value = false
         stopTimer()
         _recentBearings.clear()
@@ -567,7 +607,7 @@ class RoadTrackerViewModel(
         val points = _activeCoordinates.value
         val dist = _activeDistance.value
         if (points.size < 2) {
-            // Cancel ride if there aren't enough points recorded
+            DebugLogger.w("GPS", "Tracking stopped but discarded: too few coordinate points recorded (${points.size}).")
             _activeCoordinates.value = emptyList()
             _activeDistance.value = 0.0
             unregisterSensors()
@@ -599,9 +639,15 @@ class RoadTrackerViewModel(
             telemetryJson = serializedTelemetry
         )
 
+        DebugLogger.i("DATABASE", "Saving route '${route.name}' to local database. (Points: ${points.size}, Dist: ${String.format(Locale.US, "%.2f km", dist)})")
         viewModelScope.launch {
-            repository.insert(route)
-            triggerSyncPush()
+            try {
+                repository.insert(route)
+                DebugLogger.sys("DATABASE", "Route '${route.name}' successfully committed to Room DB. Syncing with backend...")
+                triggerSyncPush()
+            } catch (e: Exception) {
+                DebugLogger.e("DATABASE", "CRITICAL error occurred while saving tracking route: '${route.name}'", e)
+            }
         }
 
         // Reset tracking buffers
@@ -612,6 +658,7 @@ class RoadTrackerViewModel(
     }
 
     fun discardActiveTracking() {
+        DebugLogger.w("GPS", "User initiated tracking discard. Purging active coordinate and sensor data.")
         _isTracking.value = false
         stopTimer()
         _recentBearings.clear()
@@ -713,8 +760,12 @@ class RoadTrackerViewModel(
         )
 
         viewModelScope.launch {
-            repository.insert(route)
-            triggerSyncPush()
+            try {
+                repository.insert(route)
+                triggerSyncPush()
+            } catch (e: Exception) {
+                DebugLogger.e("DATABASE", "CRITICAL error occurred while saving manual route: '${route.name}'", e)
+            }
         }
 
         // Reset drawing buffers
@@ -806,6 +857,10 @@ class RoadTrackerViewModel(
 
     fun clearMapCenterTrigger() {
         _mapCenter.value = null
+    }
+
+    fun centerMapOn(point: RoutePoint) {
+        _mapCenter.value = point
     }
 
     private var searchJob: Job? = null
@@ -930,8 +985,12 @@ class RoadTrackerViewModel(
         )
 
         viewModelScope.launch {
-            repository.insert(route)
-            triggerSyncPush()
+            try {
+                repository.insert(route)
+                triggerSyncPush()
+            } catch (e: Exception) {
+                DebugLogger.e("DATABASE", "CRITICAL error occurred while importing GPX route: '${route.name}'", e)
+            }
         }
 
         return "Successfully imported route: $name (${String.format(Locale.US, "%.2f", distance)} km)"

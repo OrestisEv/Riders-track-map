@@ -51,6 +51,7 @@ import com.example.data.Route
 import com.example.data.RoutePoint
 import com.example.data.RouteRepository
 import com.example.data.SearchResult
+import com.example.data.DebugLogger
 import com.example.ui.LeafletMapView
 import com.example.ui.RoadTrackerViewModel
 import com.example.ui.RoadTrackerViewModelFactory
@@ -73,6 +74,7 @@ class MainActivity : ComponentActivity() {
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
             for (location in locationResult.locations) {
+                DebugLogger.i("GPS", "Location update: [${location.latitude}, ${location.longitude}], Accuracy: ${location.accuracy}m, Speed: ${location.speed} m/s")
                 val point = RoutePoint(location.latitude, location.longitude)
                 viewModel.addTrackingPoint(point, location.speed)
                 currentUserLocation.value = point
@@ -83,6 +85,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Initialize diagnostic debug logger
+        DebugLogger.init(applicationContext)
+        DebugLogger.sys("SYSTEM", "Velocitron mobile subsystem active. Version 2.4.0-RC initialized successfully.")
 
         val database = AppDatabase.getDatabase(this)
         val repository = RouteRepository(database.routeDao())
@@ -108,7 +114,7 @@ class MainActivity : ComponentActivity() {
                     currentUserLocation = currentUserLocation,
                     onStartLocationUpdates = { startLocationUpdates() },
                     onStopLocationUpdates = { stopLocationUpdates() },
-                    onFetchLastLocation = { fetchLastKnownLocation() }
+                    onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) }
                 )
             }
         }
@@ -116,6 +122,7 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
+        DebugLogger.i("GPS", "Starting high-precision location updates. Interval: 3000ms.")
         val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000L).apply {
             setMinUpdateIntervalMillis(1500L)
             setMinUpdateDistanceMeters(1.0f)
@@ -128,25 +135,35 @@ class MainActivity : ComponentActivity() {
                 android.os.Looper.getMainLooper()
             )
         } catch (e: Exception) {
+            DebugLogger.e("GPS", "Failed to request location updates", e)
             e.printStackTrace()
         }
     }
 
     private fun stopLocationUpdates() {
+        DebugLogger.i("GPS", "Stopping high-precision location updates.")
         fusedLocationClient.removeLocationUpdates(locationCallback)
     }
 
     @SuppressLint("MissingPermission")
-    private fun fetchLastKnownLocation() {
+    private fun fetchLastKnownLocation(forceCenter: Boolean = false) {
+        DebugLogger.i("GPS", "Querying last known location profile (forceCenter=$forceCenter)...")
         try {
             fusedLocationClient.lastLocation.addOnSuccessListener { location ->
                 if (location != null) {
+                    DebugLogger.i("GPS", "Acquired last known location: [Lat: ${location.latitude}, Lng: ${location.longitude}]")
                     val point = RoutePoint(location.latitude, location.longitude)
                     currentUserLocation.value = point
+                    if (forceCenter) {
+                        viewModel.centerMapOn(point)
+                    }
                     viewModel.selectRoute(null) // Reset selection to trigger centering
+                } else {
+                    DebugLogger.w("GPS", "Last known location is currently null.")
                 }
             }
         } catch (e: Exception) {
+            DebugLogger.e("GPS", "Error fetching last known location", e)
             e.printStackTrace()
         }
     }
@@ -160,7 +177,7 @@ fun RoadTrackerApp(
     currentUserLocation: MutableState<RoutePoint?>,
     onStartLocationUpdates: () -> Unit,
     onStopLocationUpdates: () -> Unit,
-    onFetchLastLocation: () -> Unit
+    onFetchLastLocation: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var hasLocationPermission by remember { mutableStateOf(false) }
@@ -198,7 +215,7 @@ fun RoadTrackerApp(
         val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
         if (fineGranted || coarseGranted) {
             hasLocationPermission = true
-            onFetchLastLocation()
+            onFetchLastLocation(true)
         } else {
             Toast.makeText(context, "Location permission is required for motorcycle live recording mode.", Toast.LENGTH_LONG).show()
         }
@@ -800,6 +817,7 @@ fun RoadTrackerApp(
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
+                        .navigationBarsPadding()
                         .padding(bottom = if (isSheetExpanded) 360.dp else 16.dp, end = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     horizontalAlignment = Alignment.End
@@ -807,9 +825,9 @@ fun RoadTrackerApp(
                     // Location zoom controls
                     FloatingActionButton(
                         onClick = {
-                            onFetchLastLocation()
+                            onFetchLastLocation(true)
                             currentUserLocation.value?.let {
-                                viewModel.selectRoute(null) 
+                                viewModel.centerMapOn(it)
                             }
                         },
                         containerColor = SlateCockpitSurface,
@@ -1047,6 +1065,7 @@ fun RoadTrackerApp(
                     Column(
                         modifier = Modifier
                             .align(Alignment.BottomStart)
+                            .navigationBarsPadding()
                             .padding(bottom = if (isSheetExpanded) 360.dp else 16.dp, start = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         horizontalAlignment = Alignment.Start
@@ -1289,6 +1308,7 @@ fun RoadTrackerApp(
                         Column(
                             modifier = Modifier
                                 .fillMaxSize()
+                                .navigationBarsPadding()
                                 .padding(horizontal = 16.dp, vertical = 12.dp)
                         ) {
                             // Header drag bar

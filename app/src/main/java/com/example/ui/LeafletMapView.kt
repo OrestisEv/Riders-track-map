@@ -36,6 +36,7 @@ fun LeafletMapView(
 
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var isPageFinished by remember { mutableStateOf(false) }
+    var hasCenteredOnStart by remember { mutableStateOf(false) }
 
     AndroidView(
         modifier = modifier,
@@ -172,6 +173,10 @@ fun LeafletMapView(
     LaunchedEffect(userLocation, isPageFinished, isMapBlackedOut) {
         if (isPageFinished && webViewInstance != null && userLocation != null && !isMapBlackedOut) {
             webViewInstance?.evaluateJavascript("updateUserLocation(${userLocation.lat}, ${userLocation.lng})", null)
+            if (!hasCenteredOnStart) {
+                webViewInstance?.evaluateJavascript("centerMap(${userLocation.lat}, ${userLocation.lng}, 14)", null)
+                hasCenteredOnStart = true
+            }
         }
     }
 

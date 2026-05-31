@@ -1,9 +1,15 @@
 package com.example.ui
 
+import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
+import android.widget.Toast
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -16,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -23,6 +30,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
+import com.example.data.DebugLogger
+import com.example.data.LogEntry
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -30,7 +39,7 @@ fun AboutCockpitPage(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var specTabActive by remember { mutableStateOf(false) }
+    var activeTabIndex by remember { mutableStateOf(0) } // 0: Features, 1: Specs, 2: Diagnostics
     var liveGlowVal by remember { mutableStateOf(1.0f) }
 
     // Start a simple coroutine to pulsate sensor signals
@@ -177,7 +186,7 @@ fun AboutCockpitPage(
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // --- TAB SWITCHER (FEATURES VS TECHNICAL SPECS) ---
+            // --- TAB SWITCHER (FEATURES VS TECHNICAL SPECS VS DIAGNOSTICS) ---
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -187,31 +196,48 @@ fun AboutCockpitPage(
                     .padding(4.dp)
             ) {
                 Button(
-                    onClick = { specTabActive = false },
+                    onClick = { activeTabIndex = 0 },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (!specTabActive) ElectricCyan else Color.Transparent,
-                        contentColor = if (!specTabActive) DeepDarkBackground else Color.White
+                        containerColor = if (activeTabIndex == 0) ElectricCyan else Color.Transparent,
+                        contentColor = if (activeTabIndex == 0) DeepDarkBackground else Color.White
                     ),
                     shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
                     modifier = Modifier
                         .weight(1f)
                         .testTag("about_features_tab")
                 ) {
-                    Text("Epic Features", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Features", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                 }
 
                 Button(
-                    onClick = { specTabActive = true },
+                    onClick = { activeTabIndex = 1 },
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (specTabActive) ElectricCyan else Color.Transparent,
-                        contentColor = if (specTabActive) DeepDarkBackground else Color.White
+                        containerColor = if (activeTabIndex == 1) ElectricCyan else Color.Transparent,
+                        contentColor = if (activeTabIndex == 1) DeepDarkBackground else Color.White
                     ),
                     shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
                     modifier = Modifier
-                        .weight(1f)
+                        .weight(1.1f)
                         .testTag("about_specs_tab")
                 ) {
-                    Text("Digital Spec & Physics", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("Spec & Physics", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                }
+
+                Button(
+                    onClick = { activeTabIndex = 2 },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (activeTabIndex == 2) ElectricCyan else Color.Transparent,
+                        contentColor = if (activeTabIndex == 2) DeepDarkBackground else Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("about_diagnostics_tab")
+                ) {
+                    Text("Diag Console", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                 }
             }
 
@@ -219,13 +245,13 @@ fun AboutCockpitPage(
 
             // --- CONTENTS SWAP ANIMATION ---
             AnimatedContent(
-                targetState = specTabActive,
+                targetState = activeTabIndex,
                 transitionSpec = {
                     fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
                 },
                 label = "ManifestoDetails"
-            ) { isSpec ->
-                if (!isSpec) {
+            ) { tabIndex ->
+                if (tabIndex == 0) {
                     // Feature cards lists with gorgeous color coding
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                         FeatureShowcaseRow(
@@ -260,7 +286,7 @@ fun AboutCockpitPage(
                             tag = "04"
                         )
                     }
-                } else {
+                } else if (tabIndex == 1) {
                     // Technical specification sheet
                     Card(
                         modifier = Modifier
@@ -327,6 +353,250 @@ fun AboutCockpitPage(
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
+                        }
+                    }
+                } else {
+                    // --- DIAGNOSTIC LOG TERMINAL ---
+                    val logs by com.example.data.DebugLogger.logsFlow.collectAsState()
+                    var levelFilter by remember { mutableStateOf("ALL") }
+                    var searchQuery by remember { mutableStateOf("") }
+                    val context = LocalContext.current
+
+                    val filteredLogs = remember(logs, levelFilter, searchQuery) {
+                        logs.filter { entry ->
+                            (levelFilter == "ALL" || entry.level.uppercase() == levelFilter) &&
+                            (searchQuery.isEmpty() || entry.message.contains(searchQuery, ignoreCase = true) || entry.tag.contains(searchQuery, ignoreCase = true))
+                        }.reversed() // Show newest first
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(SlateCockpitSurface)
+                            .border(1.dp, GeometricBorder, RoundedCornerShape(20.dp))
+                            .padding(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = "SYSTEM LOG CONSOLE",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = ElectricCyan,
+                                    letterSpacing = 1.2.sp
+                                )
+                                Text(
+                                    text = "Live kernel event diagnostic listener",
+                                    fontSize = 10.sp,
+                                    color = TextMuted
+                                )
+                            }
+                            
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                IconButton(
+                                    onClick = {
+                                        val logText = logs.joinToString("\n") { it.toFormattedString() }
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = ClipData.newPlainText("Riders Track Logs", logText)
+                                        clipboard.setPrimaryClip(clip)
+                                        Toast.makeText(context, "Copied all logs to clipboard", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(36.dp).testTag("log_copy_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "Copy to Clipboard",
+                                        tint = ElectricCyan,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        com.example.data.DebugLogger.shareLogs(context)
+                                    },
+                                    modifier = Modifier.size(36.dp).testTag("log_share_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Share,
+                                        contentDescription = "Share Logs",
+                                        tint = NeonGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = {
+                                        com.example.data.DebugLogger.clear()
+                                        Toast.makeText(context, "Terminal logs cleared", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(36.dp).testTag("log_clear_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Delete,
+                                        contentDescription = "Truncate log file",
+                                        tint = NeonPink,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Filter keywords (e.g. GPS, ROOM_DB)", fontSize = 12.sp, color = TextMuted) },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = DeepDarkBackground,
+                                unfocusedContainerColor = DeepDarkBackground,
+                                focusedBorderColor = ElectricCyan,
+                                unfocusedBorderColor = GeometricBorder,
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            ),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+                            modifier = Modifier.fillMaxWidth().height(48.dp).testTag("log_search_input")
+                        )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        ) {
+                            val levels = listOf("ALL", "INFO", "WARN", "ERROR", "SYS")
+                            levels.forEach { level ->
+                                val isSelected = levelFilter == level
+                                val borderCol = when(level) {
+                                    "INFO" -> NeonGreen
+                                    "WARN" -> CockpitOrange
+                                    "ERROR" -> NeonPink
+                                    "SYS" -> ElectricCyan
+                                    else -> Color.White
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (isSelected) borderCol.copy(alpha = 0.15f) else Color.Transparent)
+                                        .border(1.dp, if (isSelected) borderCol else GeometricBorder, RoundedCornerShape(6.dp))
+                                        .clickable { levelFilter = level }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = level,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isSelected) borderCol else TextMuted
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(300.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.Black)
+                                .border(1.dp, GeometricBorder, RoundedCornerShape(12.dp))
+                                .padding(10.dp)
+                        ) {
+                            if (filteredLogs.isEmpty()) {
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "CONSOLE INACTIVE\nNO MATCHING DIAGNOSTIC RECORDS",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp,
+                                        color = TextMuted,
+                                        textAlign = TextAlign.Center,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    items(filteredLogs) { logEntry ->
+                                        val lineCol = when (logEntry.level.uppercase()) {
+                                            "SYS" -> ElectricCyan
+                                            "INFO" -> NeonGreen
+                                            "WARN" -> CockpitOrange
+                                            "ERROR" -> NeonPink
+                                            else -> Color.White
+                                        }
+                                        Column {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = "[${logEntry.timestamp.substringAfter(" ")}] ${logEntry.level}/${logEntry.tag}",
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = lineCol
+                                                )
+                                            }
+                                            Text(
+                                                text = logEntry.message,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 10.sp,
+                                                color = Color.White.copy(alpha = 0.9f),
+                                                lineHeight = 13.sp,
+                                                modifier = Modifier.padding(start = 4.dp, bottom = 2.dp)
+                                            )
+                                            if (logEntry.exception != null) {
+                                                Text(
+                                                    text = logEntry.exception,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    fontSize = 8.sp,
+                                                    color = NeonPink.copy(alpha = 0.7f),
+                                                    lineHeight = 10.sp,
+                                                    modifier = Modifier
+                                                        .padding(start = 8.dp, top = 2.dp, bottom = 4.dp)
+                                                        .background(Color.White.copy(alpha = 0.05f))
+                                                        .padding(4.dp)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Buffer: ${logs.size}/${1500} lines",
+                                fontSize = 9.sp,
+                                color = TextMuted,
+                                fontFamily = FontFamily.Monospace
+                            )
+                            Text(
+                                text = "Filtered: ${filteredLogs.size}",
+                                fontSize = 9.sp,
+                                color = ElectricCyan,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
