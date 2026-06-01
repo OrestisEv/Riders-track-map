@@ -85,6 +85,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val showDeveloperErrorDialog = mutableStateOf(false)
+
+    private fun getCertificateSHA1(context: Context): String {
+        try {
+            val pm = context.packageManager
+            val flags = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                @Suppress("DEPRECATION")
+                android.content.pm.PackageManager.GET_SIGNATURES
+            }
+            val packageInfo = pm.getPackageInfo(context.packageName, flags)
+            val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                packageInfo.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.signatures
+            }
+            
+            if (!signatures.isNullOrEmpty()) {
+                val cert = signatures[0].toByteArray()
+                val md = java.security.MessageDigest.getInstance("SHA-1")
+                val publicKey = md.digest(cert)
+                val hexString = StringBuilder()
+                for (i in publicKey.indices) {
+                    val appendString = Integer.toHexString(0xFF and publicKey[i].toInt()).uppercase()
+                    if (appendString.length == 1) {
+                        hexString.append("0")
+                    }
+                    hexString.append(appendString)
+                    if (i < publicKey.size - 1) {
+                        hexString.append(":")
+                    }
+                }
+                return hexString.toString()
+            }
+        } catch (e: Exception) {
+            DebugLogger.e("SIGNATURE_SHA1", "Error fetching SHA-1 signature", e)
+        }
+        return "Could not retrieve SHA-1 fingerprint"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -155,7 +197,16 @@ class MainActivity : ComponentActivity() {
                     Toast.makeText(this@MainActivity, "Google did not return credentials.", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Sign-in error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                var handled = false
+                if (e is com.google.android.gms.common.api.ApiException) {
+                    if (e.statusCode == 10) {
+                        showDeveloperErrorDialog.value = true
+                        handled = true
+                    }
+                }
+                if (!handled) {
+                    Toast.makeText(this@MainActivity, "Sign-in error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
                 DebugLogger.e("SUPABASE", "Google sign-in launcher exception", e)
             }
         }
@@ -173,24 +224,39 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
-                RoadTrackerApp(
-                    viewModel = viewModel,
-                    currentUserLocation = currentUserLocation,
-                    onStartLocationUpdates = { startLocationUpdates() },
-                    onStopLocationUpdates = { stopLocationUpdates() },
-                    onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) },
-                    onSignInClick = {
-                        val signInIntent = googleSignInClient.signInIntent
-                        googleSignInLauncher.launch(signInIntent)
-                    },
-                    onSignOutClick = {
-                        lifecycleScope.launch {
-                            com.example.data.SupabaseManager.signOut()
-                            googleSignInClient.signOut()
-                            Toast.makeText(this@MainActivity, "Signed out successfully", Toast.LENGTH_SHORT).show()
+                Box(modifier = Modifier.fillMaxSize()) {
+                    RoadTrackerApp(
+                        viewModel = viewModel,
+                        currentUserLocation = currentUserLocation,
+                        onStartLocationUpdates = { startLocationUpdates() },
+                        onStopLocationUpdates = { stopLocationUpdates() },
+                        onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) },
+                        onSignInClick = {
+                            val signInIntent = googleSignInClient.signInIntent
+                            googleSignInLauncher.launch(signInIntent)
+                        },
+                        onSignOutClick = {
+                            lifecycleScope.launch {
+                                try {
+                                    com.example.data.SupabaseManager.signOut()
+                                    googleSignInClient.signOut()
+                                } catch (e: Exception) {
+                                    DebugLogger.e("SIGN_OUT", "Error during Google/Supabase signout", e)
+                                }
+                                Toast.makeText(this@MainActivity, "Signed out successfully", Toast.LENGTH_SHORT).show()
+                            }
                         }
+                    )
+
+                    if (showDeveloperErrorDialog.value) {
+                        GoogleDeveloperErrorDialog(
+                            onDismiss = { showDeveloperErrorDialog.value = false },
+                            packageName = packageName,
+                            sha1 = getCertificateSHA1(this@MainActivity),
+                            clientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
+                        )
                     }
-                )
+                }
             }
         }
     }
@@ -2339,4 +2405,148 @@ fun formatElapsedTime(seconds: Long): String {
     val m = (seconds % 3600) / 60
     val s = seconds % 60
     return String.format(Locale.US, "%02d:%02d:%02d", h, m, s)
+}
+
+@Composable
+fun GoogleDeveloperErrorDialog(
+    onDismiss: () -> Unit,
+    packageName: String,
+    sha1: String,
+    clientId: String
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SlateCockpitSurface,
+        titleContentColor = Color.White,
+        textContentColor = TextSilver,
+        tonalElevation = 8.dp,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Config Mismatch",
+                    tint = NeonPink,
+                    modifier = Modifier.size(28.dp)
+                )
+                Text(
+                    text = "Google Sign-In Error 10",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    Text(
+                        text = "This is a Developer Error (CommonStatusCodes.DEVELOPER_ERROR) indicating your phone's signing key and package name are not registered with Google.",
+                        fontSize = 14.sp,
+                        color = TextSilver
+                    )
+                }
+                
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(DeepDarkBackground, RoundedCornerShape(8.dp))
+                            .border(1.dp, GeometricBorder, RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "REQUIRED GOOGLE CONSOLE CONFIG",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ElectricCyan,
+                            letterSpacing = 0.5.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = "Package Name:",
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(
+                                text = packageName,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White
+                            )
+                        }
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = "SHA-1 Fingerprint (Your Key):",
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(
+                                text = sha1,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.Yellow
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            text = "Configured Web Client ID:",
+                            fontSize = 11.sp,
+                            color = TextMuted
+                        )
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(
+                                text = if (clientId.isNotBlank()) clientId else "[NOT SET / BLANK]",
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (clientId.isNotBlank()) TextSilver else NeonPink,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+                
+                item {
+                    Text(
+                        text = "To resolve this:\n" +
+                                "1. Go to Firebase Console / Google Cloud Console Project APIs -> Credentials.\n" +
+                                "2. Register the SHA-1 footprint above under your Android app configuration.\n" +
+                                "3. Make sure GOOGLE_WEB_CLIENT_ID matches your project's Web Application Client ID.",
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        color = TextMuted
+                    )
+                }
+                
+                item {
+                    Text(
+                        text = "Pro Tip: You can bypass this sync completely and use the app offline with full features by choosing 'Enter Offline Demo Cockpit' on the Login Screen!",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = NeonGreen
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = ElectricCyan)
+            ) {
+                Text("Dismiss", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }

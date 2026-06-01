@@ -16,6 +16,7 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.channel
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,7 +28,10 @@ import kotlinx.coroutines.launch
 import java.io.IOException
 
 object SupabaseManager {
-    private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private val exceptionHandler = CoroutineExceptionHandler { _, exception ->
+        DebugLogger.e("COROUTINE_ERROR", "Unhandled exception in Supabase Scope", exception)
+    }
+    private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob() + exceptionHandler)
 
     // Supabase client instance with robust url parsing and exception resilience
     val supabase = try {
@@ -70,23 +74,31 @@ object SupabaseManager {
         database = AppDatabase.getDatabase(context)
         sharedPrefs = context.applicationContext.getSharedPreferences("roadtracker_supabase_queue", Context.MODE_PRIVATE)
 
-        // Observe session state changes
+        // Observe session state changes safely
         coroutineScope.launch {
-            supabase.auth.sessionStatus.collect { status ->
-                _sessionState.value = status
-                if (status is SessionStatus.Authenticated) {
-                    val userId = status.session.user?.id
-                    if (userId != null) {
-                        DebugLogger.sys("SUPABASE", "User session established: '${status.session.user?.email}' ($userId)")
-                        // Trigger bi-directional sync and subscribe
-                        syncFromCloudToRoom(userId)
-                        startRealtimeSync(userId)
-                        flushOfflineQueue(userId)
+            try {
+                supabase.auth.sessionStatus.collect { status ->
+                    _sessionState.value = status
+                    if (status is SessionStatus.Authenticated) {
+                        val userId = status.session.user?.id
+                        if (userId != null) {
+                            DebugLogger.sys("SUPABASE", "User session established: '${status.session.user?.email}' ($userId)")
+                            // Trigger bi-directional sync and subscribe safely
+                            try {
+                                syncFromCloudToRoom(userId)
+                                startRealtimeSync(userId)
+                                flushOfflineQueue(userId)
+                            } catch (e: Exception) {
+                                DebugLogger.e("SUPABASE", "Internal syncing flow exception occurred", e)
+                            }
+                        }
+                    } else {
+                        realtimeJob?.cancel()
+                        realtimeJob = null
                     }
-                } else {
-                    realtimeJob?.cancel()
-                    realtimeJob = null
                 }
+            } catch (e: Exception) {
+                DebugLogger.e("SUPABASE", "Exception initialized in sessionStatus collector", e)
             }
         }
     }
