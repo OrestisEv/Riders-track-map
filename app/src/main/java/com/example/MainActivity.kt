@@ -171,8 +171,6 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
-                val showSupabasePlaceholderWarningDialog = remember { mutableStateOf(false) }
-
                 Box(modifier = Modifier.fillMaxSize()) {
                     RoadTrackerApp(
                         viewModel = viewModel,
@@ -181,13 +179,14 @@ class MainActivity : ComponentActivity() {
                         onStopLocationUpdates = { stopLocationUpdates() },
                         onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) },
                         onSignInClick = {
-                            if (com.example.data.SupabaseManager.isUsingPlaceholderCredentials()) {
-                                showSupabasePlaceholderWarningDialog.value = true
-                            } else {
-                                lifecycleScope.launch {
-                                    try {
-                                        com.example.data.SupabaseManager.loginWithGoogleOAuth()
-                                    } catch (e: Exception) {
+                            lifecycleScope.launch {
+                                try {
+                                    com.example.data.SupabaseManager.loginWithGoogleOAuth()
+                                } catch (e: Exception) {
+                                    val msg = e.localizedMessage ?: ""
+                                    if (msg.contains("10") || msg.contains("DEVELOPER_ERROR") || msg.contains("developer", ignoreCase = true)) {
+                                        showDeveloperErrorDialog.value = true
+                                    } else {
                                         Toast.makeText(this@MainActivity, "OAuth failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
                                     }
                                 }
@@ -204,12 +203,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     )
-
-                    if (showSupabasePlaceholderWarningDialog.value) {
-                        SupabasePlaceholderWarningDialog(
-                            onDismiss = { showSupabasePlaceholderWarningDialog.value = false }
-                        )
-                    }
 
                     if (showDeveloperErrorDialog.value) {
                         GoogleDeveloperErrorDialog(
@@ -2021,8 +2014,17 @@ fun RoadTrackerApp(
 
     // Modal: Cloud Backend Sync Panel (Supabase Sync & User Profile)
     if (showSyncDialog) {
-        val userName = com.example.data.SupabaseManager.getCurrentUserName() ?: "Cyclist / Rider"
-        val userEmail = com.example.data.SupabaseManager.getCurrentUserEmail() ?: "Supabase Connected"
+        val isUserAuthenticated = sessionStatus is io.github.jan.supabase.auth.status.SessionStatus.Authenticated
+        val userName = if (isUserAuthenticated) {
+            com.example.data.SupabaseManager.getCurrentUserName() ?: "Cyclist / Rider"
+        } else {
+            "Offline Rider"
+        }
+        val userEmail = if (isUserAuthenticated) {
+            com.example.data.SupabaseManager.getCurrentUserEmail() ?: "Supabase Connected"
+        } else {
+            "No cloud connection"
+        }
         val scope = rememberCoroutineScope()
         
         AlertDialog(
@@ -2048,7 +2050,11 @@ fun RoadTrackerApp(
             text = {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     Text(
-                        text = "Your routes are secured by your Google account and synced to Supabase database.",
+                        text = if (isUserAuthenticated) {
+                            "Your routes are secured by your Google account and synced to Supabase database."
+                        } else {
+                            "You are currently in Offline Cockpit mode. Sync features are suspended."
+                        },
                         fontSize = 12.sp,
                         color = TextSilver,
                         lineHeight = 16.sp
@@ -2110,30 +2116,39 @@ fun RoadTrackerApp(
                             modifier = Modifier
                                 .size(6.dp)
                                 .clip(CircleShape)
-                                .background(NeonGreen)
+                                .background(if (isUserAuthenticated) NeonGreen else Color(0xFFE9A13F))
                         )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "ACTIVE & SECURE",
+                            text = if (isUserAuthenticated) "ACTIVE & SECURE" else "OFFLINE & LOCAL",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.ExtraBold,
-                            color = NeonGreen
+                            color = if (isUserAuthenticated) NeonGreen else Color(0xFFE9A13F)
                         )
                     }
                     
                     Spacer(modifier = Modifier.height(12.dp))
                     
-                    val pendingOps = com.example.data.SupabaseManager.getPendingOperationsCount()
-                    if (pendingOps > 0) {
-                        Text(
-                            text = "⏳ Offline mode active. $pendingOps operations queued. Will synchronize automatically when mobile network is online.",
-                            fontSize = 11.sp,
-                            color = NeonPink,
-                            lineHeight = 15.sp
-                        )
+                    if (isUserAuthenticated) {
+                        val pendingOps = com.example.data.SupabaseManager.getPendingOperationsCount()
+                        if (pendingOps > 0) {
+                            Text(
+                                text = "⏳ Offline mode active. $pendingOps operations queued. Will synchronize automatically when mobile network is online.",
+                                fontSize = 11.sp,
+                                color = NeonPink,
+                                lineHeight = 15.sp
+                            )
+                        } else {
+                            Text(
+                                text = "💡 Any routes recorded on other devices logging into this Google account will automatically synchronize to this device instantly.",
+                                fontSize = 10.sp,
+                                color = TextMuted,
+                                lineHeight = 14.sp
+                            )
+                        }
                     } else {
                         Text(
-                            text = "💡 Any routes recorded on other devices logging into this Google account will automatically synchronize to this device instantly.",
+                            text = "💡 Any routes, drawn tracks, or telemetry cockpit journals you record are securely stored in your local SQLite Room database.",
                             fontSize = 10.sp,
                             color = TextMuted,
                             lineHeight = 14.sp
@@ -2146,21 +2161,23 @@ fun RoadTrackerApp(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(
-                        onClick = {
-                            val uid = com.example.data.SupabaseManager.getCurrentUserId()
-                            if (uid != null) {
-                                scope.launch {
-                                    com.example.data.SupabaseManager.syncFromCloudToRoom(uid)
-                                    Toast.makeText(context, "Cloud sync refresh started", Toast.LENGTH_SHORT).show()
+                    if (isUserAuthenticated) {
+                        TextButton(
+                            onClick = {
+                                val uid = com.example.data.SupabaseManager.getCurrentUserId()
+                                if (uid != null) {
+                                    scope.launch {
+                                        com.example.data.SupabaseManager.syncFromCloudToRoom(uid)
+                                        Toast.makeText(context, "Cloud sync refresh started", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
-                            }
-                        },
-                        colors = ButtonDefaults.textButtonColors(
-                            contentColor = ElectricCyan
-                        )
-                    ) {
-                        Text("REFRESH SYNC", fontWeight = FontWeight.Bold)
+                            },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = ElectricCyan
+                            )
+                        ) {
+                            Text("REFRESH SYNC", fontWeight = FontWeight.Bold)
+                        }
                     }
 
                     Button(
@@ -2170,12 +2187,12 @@ fun RoadTrackerApp(
                             showSyncDialog = false
                         },
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = NeonPink.copy(alpha = 0.2f),
-                            contentColor = NeonPink
+                            containerColor = if (isUserAuthenticated) NeonPink.copy(alpha = 0.2f) else Color(0xFFE9A13F).copy(alpha = 0.2f),
+                            contentColor = if (isUserAuthenticated) NeonPink else Color(0xFFE9A13F)
                         ),
-                        border = BorderStroke(1.dp, NeonPink.copy(alpha = 0.5f))
+                        border = BorderStroke(1.dp, (if (isUserAuthenticated) NeonPink else Color(0xFFE9A13F)).copy(alpha = 0.5f))
                     ) {
-                        Text("SIGN OUT", fontWeight = FontWeight.Bold)
+                        Text(if (isUserAuthenticated) "SIGN OUT" else "EXIT OFFLINE", fontWeight = FontWeight.Bold)
                     }
                 }
             },
@@ -2250,45 +2267,7 @@ fun GoogleSignInScreen(
                 textAlign = TextAlign.Center
             )
             
-            val isUsingPlaceholder = com.example.data.SupabaseManager.isUsingPlaceholderCredentials()
-            if (isUsingPlaceholder) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFE9A13F).copy(alpha = 0.15f))
-                        .border(1.dp, Color(0xFFE9A13F).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
-                        .padding(14.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.Top) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = "Warning",
-                            tint = Color(0xFFFFC107),
-                            modifier = Modifier.size(20.dp).offset(y = 2.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "Setup Required for Cloud Auth",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "The app is currently configured with placeholder Supabase credentials (your-project.supabase.co).\n\nPlease use the 'Offline Cockpit Mode' or configure your custom database keys via the Secrets panel in AI Studio.",
-                                fontSize = 10.5.sp,
-                                color = TextSilver,
-                                lineHeight = 14.sp
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(24.dp))
-            } else {
-                Spacer(modifier = Modifier.height(48.dp))
-            }
+            Spacer(modifier = Modifier.height(48.dp))
             
             // Cockpit themed continue with google button
             OutlinedButton(
@@ -2531,91 +2510,6 @@ fun GoogleDeveloperErrorDialog(
                 colors = ButtonDefaults.textButtonColors(contentColor = ElectricCyan)
             ) {
                 Text("Dismiss", fontWeight = FontWeight.Bold)
-            }
-        }
-    )
-}
-
-@Composable
-fun SupabasePlaceholderWarningDialog(
-    onDismiss: () -> Unit
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = SlateCockpitSurface,
-        titleContentColor = Color.White,
-        textContentColor = TextSilver,
-        tonalElevation = 8.dp,
-        title = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = "Configuration Needed",
-                    tint = Color(0xFFFFC107),
-                    modifier = Modifier.size(28.dp)
-                )
-                Text(
-                    text = "Supabase Config Required",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 20.sp
-                )
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "This app is configured to use Supabase for online sync, but it's currently using default placeholder credentials (your-project.supabase.co).",
-                    fontSize = 14.sp,
-                    color = TextSilver
-                )
-                
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(DeepDarkBackground, RoundedCornerShape(8.dp))
-                        .border(1.dp, GeometricBorder, RoundedCornerShape(8.dp))
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        text = "HOW TO CONNECT THE DATABASE:",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ElectricCyan,
-                        letterSpacing = 0.5.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = "1. Unfold the Secrets tab in AI Studio.\n" +
-                               "2. Ensure you have added real values for SUPABASE_URL and SUPABASE_ANON_KEY from your Supabase Project dashboard.\n" +
-                               "3. Recompile/Run the app after adding them.",
-                        fontSize = 12.sp,
-                        color = TextMuted,
-                        lineHeight = 16.sp
-                    )
-                }
-                
-                Text(
-                    text = "No database? No problem! Select \"Launch Offline Cockpit Mode\" on the login screen to enjoy all cockpit/telemetry features locally.",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = NeonGreen,
-                    lineHeight = 18.sp
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = onDismiss,
-                colors = ButtonDefaults.textButtonColors(contentColor = ElectricCyan)
-            ) {
-                Text("Got It", fontWeight = FontWeight.Bold)
             }
         }
     )

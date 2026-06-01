@@ -35,38 +35,20 @@ object SupabaseManager {
     }
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob() + exceptionHandler)
 
-    // Supabase client instance with robust url parsing and exception resilience
-    val supabase = try {
-        val url = if (BuildConfig.SUPABASE_URL.isNotBlank() && (BuildConfig.SUPABASE_URL.startsWith("http://") || BuildConfig.SUPABASE_URL.startsWith("https://"))) {
-            BuildConfig.SUPABASE_URL
-        } else {
-            "https://placeholder-project.supabase.co"
+    const val SUPABASE_URL = "https://qpbpsrdzvfmyfcqihzdl.supabase.co"
+    const val SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFwYnBzcmR6dmZteWZjcWloemRsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxOTU5MzcsImV4cCI6MjA5NTc3MTkzN30.6iCg9cN-RwsAhEbuuEmqR908rv2gIIHlbyrAEZ8vXzY"
+
+    // Supabase client instance using live credentials
+    val supabase = createSupabaseClient(
+        supabaseUrl = SUPABASE_URL,
+        supabaseKey = SUPABASE_ANON_KEY
+    ) {
+        install(Auth) {
+            scheme = "com.aistudio.roadtracker.kxymqd"
+            host = "login-callback"
         }
-        val key = if (BuildConfig.SUPABASE_ANON_KEY.isNotBlank()) BuildConfig.SUPABASE_ANON_KEY else "dummy-key"
-        
-        createSupabaseClient(
-            supabaseUrl = url,
-            supabaseKey = key
-        ) {
-            install(Auth) {
-                scheme = "com.aistudio.roadtracker.kxymqd"
-                host = "login-callback"
-            }
-            install(Postgrest)
-            install(Realtime)
-        }
-    } catch (e: Exception) {
-        createSupabaseClient(
-            supabaseUrl = "https://placeholder-project.supabase.co",
-            supabaseKey = "dummy-key"
-        ) {
-            install(Auth) {
-                scheme = "com.aistudio.roadtracker.kxymqd"
-                host = "login-callback"
-            }
-            install(Postgrest)
-            install(Realtime)
-        }
+        install(Postgrest)
+        install(Realtime)
     }
 
     private lateinit var database: AppDatabase
@@ -131,15 +113,7 @@ object SupabaseManager {
     }
 
     fun isUsingPlaceholderCredentials(): Boolean {
-        val url = BuildConfig.SUPABASE_URL
-        val anonKey = BuildConfig.SUPABASE_ANON_KEY
-        return url.isBlank() || 
-               url == "https://your-project.supabase.co" || 
-               url.contains("placeholder") || 
-               url.contains("your-project") || 
-               anonKey.isBlank() || 
-               anonKey == "your-supabase-anon-key" || 
-               anonKey == "dummy-key"
+        return false
     }
 
     suspend fun loginWithGoogleOAuth() {
