@@ -37,6 +37,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,9 +72,6 @@ class MainActivity : ComponentActivity() {
     private lateinit var viewModel: RoadTrackerViewModel
 
     private val currentUserLocation = mutableStateOf<RoutePoint?>(null)
-
-    private lateinit var googleSignInClient: com.google.android.gms.auth.api.signin.GoogleSignInClient
-    private lateinit var googleSignInLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
@@ -148,66 +147,14 @@ class MainActivity : ComponentActivity() {
 
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        // Initialize Google Sign In Configurations safely to prevent crashes with empty/blank keys
-        try {
-            val clientId = BuildConfig.GOOGLE_WEB_CLIENT_ID
-            if (clientId.isNotBlank() && clientId != "your-google-web-client-id") {
-                val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
-                    .requestIdToken(clientId)
-                    .requestEmail()
-                    .build()
-                googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(this, gso)
-            } else {
-                // Initialize a dummy client if invalid/missing to avoid NullPointer/lateinit crashes
-                val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
-                    .requestEmail()
-                    .build()
-                googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(this, gso)
-                DebugLogger.w("GOOGLE_SIGN_IN", "Google Web Client ID is blank or placeholder. Google Sign in request token is omitted.")
-            }
-        } catch (e: Exception) {
-            DebugLogger.e("GOOGLE_SIGN_IN", "Error initializing Google Sign-In options", e)
+        // Handle deep link when the activity is opened via OAuth callback
+        lifecycleScope.launch {
             try {
-                val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN)
-                    .requestEmail()
-                    .build()
-                googleSignInClient = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(this, gso)
-            } catch (fallbackEx: Exception) {
-                DebugLogger.e("GOOGLE_SIGN_IN", "Fatal exception in fallback Google client config", fallbackEx)
-            }
-        }
-
-        googleSignInLauncher = registerForActivityResult(
-            ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-            val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(result.data)
-            try {
-                val account = task.getResult(com.google.android.gms.common.api.ApiException::class.java)
-                val idToken = account?.idToken
-                if (idToken != null) {
-                    lifecycleScope.launch {
-                        val success = com.example.data.SupabaseManager.loginWithGoogle(idToken)
-                        if (success) {
-                            Toast.makeText(this@MainActivity, "Google Sign-in Successful!", Toast.LENGTH_SHORT).show()
-                        } else {
-                            Toast.makeText(this@MainActivity, "Supabase authentication failed.", Toast.LENGTH_LONG).show()
-                        }
-                    }
-                } else {
-                    Toast.makeText(this@MainActivity, "Google did not return credentials.", Toast.LENGTH_LONG).show()
+                intent?.let {
+                    com.example.data.SupabaseManager.supabase.auth.handleDeepLink(it)
                 }
             } catch (e: Exception) {
-                var handled = false
-                if (e is com.google.android.gms.common.api.ApiException) {
-                    if (e.statusCode == 10) {
-                        showDeveloperErrorDialog.value = true
-                        handled = true
-                    }
-                }
-                if (!handled) {
-                    Toast.makeText(this@MainActivity, "Sign-in error: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                }
-                DebugLogger.e("SUPABASE", "Google sign-in launcher exception", e)
+                DebugLogger.e("DEEP_LINK", "Error handling deep link in onCreate", e)
             }
         }
 
@@ -232,16 +179,20 @@ class MainActivity : ComponentActivity() {
                         onStopLocationUpdates = { stopLocationUpdates() },
                         onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) },
                         onSignInClick = {
-                            val signInIntent = googleSignInClient.signInIntent
-                            googleSignInLauncher.launch(signInIntent)
+                            lifecycleScope.launch {
+                                try {
+                                    com.example.data.SupabaseManager.loginWithGoogleOAuth()
+                                } catch (e: Exception) {
+                                    Toast.makeText(this@MainActivity, "OAuth failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                }
+                            }
                         },
                         onSignOutClick = {
                             lifecycleScope.launch {
                                 try {
                                     com.example.data.SupabaseManager.signOut()
-                                    googleSignInClient.signOut()
                                 } catch (e: Exception) {
-                                    DebugLogger.e("SIGN_OUT", "Error during Google/Supabase signout", e)
+                                    DebugLogger.e("SIGN_OUT", "Error during signout", e)
                                 }
                                 Toast.makeText(this@MainActivity, "Signed out successfully", Toast.LENGTH_SHORT).show()
                             }
@@ -284,6 +235,20 @@ class MainActivity : ComponentActivity() {
     private fun stopLocationUpdates() {
         DebugLogger.i("GPS", "Stopping high-precision location updates.")
         fusedLocationClient.removeLocationUpdates(locationCallback)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        lifecycleScope.launch {
+            try {
+                intent?.let {
+                    com.example.data.SupabaseManager.supabase.auth.handleDeepLink(it)
+                }
+            } catch (e: Exception) {
+                DebugLogger.e("DEEP_LINK", "Error handling deep link in onNewIntent", e)
+            }
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -2234,19 +2199,20 @@ fun GoogleSignInScreen(
                 .fillMaxWidth(0.85f)
                 .padding(24.dp)
         ) {
+            // Logo Icon Container
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .size(80.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color.White.copy(alpha = 0.05f))
-                    .border(1.dp, ElectricCyan.copy(alpha = 0.3f), RoundedCornerShape(24.dp))
+                    .border(2.dp, ElectricCyan.copy(alpha = 0.4f), RoundedCornerShape(24.dp))
             ) {
                 Icon(
                     imageVector = Icons.Default.DirectionsBike,
                     contentDescription = "Motorcycle Logo",
                     tint = ElectricCyan,
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier.size(46.dp)
                 )
             }
             
@@ -2257,7 +2223,7 @@ fun GoogleSignInScreen(
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Black,
                 color = Color.White,
-                letterSpacing = 2.sp,
+                letterSpacing = 3.sp,
                 textAlign = TextAlign.Center
             )
             
@@ -2272,37 +2238,21 @@ fun GoogleSignInScreen(
                 textAlign = TextAlign.Center
             )
             
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(48.dp))
             
-            Column(
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SlateCockpitSurface.copy(alpha = 0.3f))
-                    .border(1.dp, GeometricBorder, RoundedCornerShape(16.dp))
-                    .padding(16.dp)
-            ) {
-                FeatureRow(icon = Icons.Default.GpsFixed, title = "GPS Logs & Snapping", desc = "Track precise paths snaps securely to roads.")
-                FeatureRow(icon = Icons.Default.Speed, title = "High-Precision Telemetry", desc = "Record real-time speed, g-force, and lean angle.")
-                FeatureRow(icon = Icons.Default.CloudSync, title = "Supabase Cloud Sync", desc = "Your tracks belong to you, safe and synchronized offline-first.")
-            }
-            
-            Spacer(modifier = Modifier.height(32.dp))
-            
-            Button(
+            // Cockpit themed continue with google button
+            OutlinedButton(
                 onClick = onSignInClick,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White,
-                    contentColor = Color.Black
+                colors = ButtonDefaults.outlinedButtonColors(
+                    containerColor = SlateCockpitSurface,
+                    contentColor = Color.White
                 ),
-                shape = RoundedCornerShape(28.dp),
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(2.dp, ElectricCyan),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("google_sign_in_button"),
-                border = BorderStroke(1.dp, GeometricBorder),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+                    .height(56.dp)
+                    .testTag("continue_with_google_button")
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -2310,49 +2260,16 @@ fun GoogleSignInScreen(
                 ) {
                     Icon(
                         imageVector = Icons.Default.AccountCircle,
-                        contentDescription = "Google Icon",
-                        tint = Color.Black,
+                        contentDescription = "Google Logo Outline",
+                        tint = ElectricCyan,
                         modifier = Modifier.size(24.dp)
                     )
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Sign in with Google",
-                        fontSize = 15.sp,
+                        text = "Continue with Google",
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.5.sp
-                    )
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(12.dp))
-
-            OutlinedButton(
-                onClick = onDemoBypassClick,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = ElectricCyan
-                ),
-                shape = RoundedCornerShape(28.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("demo_bypass_button"),
-                border = BorderStroke(1.dp, ElectricCyan.copy(alpha = 0.5f))
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DirectionsRun,
-                        contentDescription = "Demo Cockpit",
-                        tint = ElectricCyan,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Enter Offline Demo Cockpit",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
                         letterSpacing = 0.5.sp
                     )
                 }
@@ -2360,13 +2277,20 @@ fun GoogleSignInScreen(
             
             Spacer(modifier = Modifier.height(16.dp))
             
-            Text(
-                text = "Secure Google Sign-In powered by Supabase. Your routes are kept private, and sync is automatic.",
-                fontSize = 10.sp,
-                color = TextMuted,
-                textAlign = TextAlign.Center,
-                lineHeight = 14.sp
-            )
+            TextButton(
+                onClick = onDemoBypassClick,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = TextMuted
+                ),
+                modifier = Modifier.testTag("offline_bypass_button")
+            ) {
+                Text(
+                    text = "Launch Offline Cockpit Mode",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Normal,
+                    letterSpacing = 0.5.sp
+                )
+            }
         }
     }
 }

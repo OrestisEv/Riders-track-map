@@ -6,6 +6,7 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.IDToken
+import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.postgrest.Postgrest
@@ -46,7 +47,10 @@ object SupabaseManager {
             supabaseUrl = url,
             supabaseKey = key
         ) {
-            install(Auth)
+            install(Auth) {
+                scheme = "com.aistudio.roadtracker.kxymqd"
+                host = "login-callback"
+            }
             install(Postgrest)
             install(Realtime)
         }
@@ -55,7 +59,10 @@ object SupabaseManager {
             supabaseUrl = "https://placeholder-project.supabase.co",
             supabaseKey = "dummy-key"
         ) {
-            install(Auth)
+            install(Auth) {
+                scheme = "com.aistudio.roadtracker.kxymqd"
+                host = "login-callback"
+            }
             install(Postgrest)
             install(Realtime)
         }
@@ -122,17 +129,13 @@ object SupabaseManager {
         return name ?: user.email?.substringBefore("@")
     }
 
-    suspend fun loginWithGoogle(idToken: String): Boolean {
-        return try {
-            DebugLogger.i("SUPABASE", "Signing in to Supabase via Google ID Token...")
-            supabase.auth.signInWith(IDToken) {
-                this.idToken = idToken
-                this.provider = Google
-            }
-            true
+    suspend fun loginWithGoogleOAuth() {
+        try {
+            DebugLogger.i("SUPABASE", "Signing in to Supabase via Google Browser OAuth...")
+            supabase.auth.signInWith(Google)
         } catch (e: Exception) {
-            DebugLogger.e("SUPABASE", "Supabase Google login failed", e)
-            false
+            DebugLogger.e("SUPABASE", "Supabase Google OAuth failed", e)
+            throw e
         }
     }
 
