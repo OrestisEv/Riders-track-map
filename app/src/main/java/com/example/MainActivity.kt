@@ -2342,6 +2342,17 @@ fun GoogleSignInScreen(
                 )
             }
         }
+
+        Text(
+            text = "built from moto riders for moto riders!",
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+            color = ElectricCyan.copy(alpha = 0.6f),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 24.dp)
+        )
     }
 }
 
