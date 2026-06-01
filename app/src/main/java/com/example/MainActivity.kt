@@ -151,7 +151,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 intent?.let {
-                    com.example.data.SupabaseManager.supabase.auth.handleDeepLink(it)
+                    com.example.data.SupabaseManager.handleDeepLink(it)
                 }
             } catch (e: Exception) {
                 DebugLogger.e("DEEP_LINK", "Error handling deep link in onCreate", e)
@@ -243,7 +243,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             try {
                 intent?.let {
-                    com.example.data.SupabaseManager.supabase.auth.handleDeepLink(it)
+                    com.example.data.SupabaseManager.handleDeepLink(it)
                 }
             } catch (e: Exception) {
                 DebugLogger.e("DEEP_LINK", "Error handling deep link in onNewIntent", e)

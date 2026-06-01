@@ -5,6 +5,7 @@ import com.example.BuildConfig
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.handleDeeplinks
 import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.providers.builtin.Email
 import io.github.jan.supabase.auth.providers.Google
@@ -135,6 +136,16 @@ object SupabaseManager {
             supabase.auth.signInWith(Google)
         } catch (e: Exception) {
             DebugLogger.e("SUPABASE", "Supabase Google OAuth failed", e)
+            throw e
+        }
+    }
+
+    suspend fun handleDeepLink(intent: android.content.Intent) {
+        try {
+            DebugLogger.i("SUPABASE", "Handling incoming deep link intent: $intent")
+            supabase.handleDeeplinks(intent)
+        } catch (e: Exception) {
+            DebugLogger.e("SUPABASE", "Supabase deep link handling failed", e)
             throw e
         }
     }
