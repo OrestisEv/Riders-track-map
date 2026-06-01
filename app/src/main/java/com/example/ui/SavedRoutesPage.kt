@@ -160,12 +160,12 @@ fun SavedRoutesPage(
                 actions = {
                     // Import GPX Shortcut
                     TextButton(
-                        onClick = { gpxPickerLauncher.launch("application/gpx+xml") },
+                        onClick = { gpxPickerLauncher.launch("*/*") },
                         colors = ButtonDefaults.textButtonColors(contentColor = NeonGreen)
                     ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = "Import GPX", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.UploadFile, contentDescription = "Import GPX/GP", modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("IMPORT", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("IMPORT GP/GPX", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
                     // Share all routes JSON

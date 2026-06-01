@@ -59,25 +59,43 @@
         }).setView([defaultLat, defaultLng], 13);
 
         // Map theme function
-        function setMapTheme(isLight) {
+        function setMapTheme(theme) {
             if (activeTileLayer) {
                 map.removeLayer(activeTileLayer);
             }
-            var url = isLight 
-                ? 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
-                : 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+            var themeName = 'dark';
+            if (theme === true || theme === 'true' || theme === 'light') {
+                themeName = 'light';
+            } else if (theme === 'terrain') {
+                themeName = 'terrain';
+            }
+
+            var url;
+            if (themeName === 'light') {
+                url = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+            } else if (themeName === 'terrain') {
+                url = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+            } else {
+                url = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+            }
             
+            var maxZoomVal = themeName === 'terrain' ? 17 : 20;
             activeTileLayer = L.tileLayer(url, {
-                maxZoom: 20,
-                attribution: '&copy; OpenStreetMap &copy; CARTO'
+                maxZoom: maxZoomVal,
+                attribution: themeName === 'terrain' 
+                    ? 'Map data: &copy; OSM, SRTM | Style: OpenTopoMap' 
+                    : '&copy; OpenStreetMap &copy; CARTO'
             }).addTo(map);
 
             // Update container background colors dynamically to match
             var body = document.body;
             var container = document.querySelector('.leaflet-container');
-            if (isLight) {
+            if (themeName === 'light') {
                 body.style.backgroundColor = '#F8FAFC';
                 if (container) container.style.setProperty('background', '#F8FAFC', 'important');
+            } else if (themeName === 'terrain') {
+                body.style.backgroundColor = '#E1E9DD';
+                if (container) container.style.setProperty('background', '#E1E9DD', 'important');
             } else {
                 body.style.backgroundColor = '#050508';
                 if (container) container.style.setProperty('background', '#050508', 'important');

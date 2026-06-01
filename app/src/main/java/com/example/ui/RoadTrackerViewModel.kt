@@ -45,13 +45,29 @@ class RoadTrackerViewModel(
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "idle")
 
-    private val _isLightMap = MutableStateFlow(sharedPrefs.getBoolean("light_map_theme", false))
+    private val _mapStyle = MutableStateFlow(sharedPrefs.getString("map_style", "dark") ?: "dark")
+    val mapStyle: StateFlow<String> = _mapStyle.asStateFlow()
+
+    private val _isLightMap = MutableStateFlow(_mapStyle.value == "light")
     val isLightMap: StateFlow<Boolean> = _isLightMap.asStateFlow()
 
     fun toggleMapTheme() {
-        val newValue = !_isLightMap.value
-        _isLightMap.value = newValue
-        sharedPrefs.edit().putBoolean("light_map_theme", newValue).apply()
+        val nextStyle = when (_mapStyle.value) {
+            "dark" -> "light"
+            "light" -> "terrain"
+            else -> "dark"
+        }
+        _mapStyle.value = nextStyle
+        _isLightMap.value = (nextStyle == "light")
+        sharedPrefs.edit().putString("map_style", nextStyle).apply()
+    }
+
+    private val _hasAcceptedSafetyTerms = MutableStateFlow(sharedPrefs.getBoolean("has_accepted_safety_terms_v2", false))
+    val hasAcceptedSafetyTerms: StateFlow<Boolean> = _hasAcceptedSafetyTerms.asStateFlow()
+
+    fun acceptSafetyTerms() {
+        _hasAcceptedSafetyTerms.value = true
+        sharedPrefs.edit().putBoolean("has_accepted_safety_terms_v2", true).apply()
     }
 
     init {
@@ -816,29 +832,102 @@ class RoadTrackerViewModel(
 
     fun importGpx(gpxText: String, customName: String? = null): String {
         val points = mutableListOf<RoutePoint>()
-        // Simple XML tag search using regex (highly resilient, doesn't depend on sensitive parsers)
-        val regex = """<trkpt\s+lat=["'](-?\d+\.?\d*)["']\s+lon=["'](-?\d+\.?\d*)["']""".toRegex()
-        val matches = regex.findAll(gpxText)
-        for (match in matches) {
-            val lat = match.groupValues[1].toDoubleOrNull()
-            val lng = match.groupValues[2].toDoubleOrNull()
-            if (lat != null && lng != null) {
-                points.add(RoutePoint(lat, lng))
+        
+        // 1. Try parsing GPX (XML) format (support lat/lon in either order, plus lat/lng)
+        if (gpxText.contains("<trkpt", ignoreCase = true)) {
+            val regex1 = """<trkpt\s+[^>]*?lat=["'](-?\d+\.?\d*)["']\s+[^>]*?lo[ng]=["'](-?\d+\.?\d*)["']""".toRegex()
+            val regex2 = """<trkpt\s+[^>]*?lo[ng]=["'](-?\d+\.?\d*)["']\s+[^>]*?lat=["'](-?\d+\.?\d*)["']""".toRegex()
+            
+            var matches = regex1.findAll(gpxText)
+            for (match in matches) {
+                val lat = match.groupValues[1].toDoubleOrNull()
+                val lng = match.groupValues[2].toDoubleOrNull()
+                if (lat != null && lng != null) {
+                    points.add(RoutePoint(lat, lng))
+                }
+            }
+            if (points.isEmpty()) {
+                matches = regex2.findAll(gpxText)
+                for (match in matches) {
+                    val lng = match.groupValues[1].toDoubleOrNull()
+                    val lat = match.groupValues[2].toDoubleOrNull()
+                    if (lat != null && lng != null) {
+                        points.add(RoutePoint(lat, lng))
+                    }
+                }
             }
         }
-
-        if (points.size < 2) {
-            return "Failed to import: Found less than 2 tracking nodes in GPX format."
+        
+        // 2. Try JSON formats if XML parser found nothing (e.g. JSON coordinate lists)
+        if (points.isEmpty()) {
+            val latLngObjRegex = """["']?lat(?:itude)?["']?\s*:\s*(-?[\d.]+)[\s,]+["']?lo[ng](?:gitude)?["']?\s*:\s*(-?[\d.]+)""".toRegex()
+            val lngLatObjRegex = """["']?lo[ng](?:gitude)?["']?\s*:\s*(-?[\d.]+)[\s,]+["']?lat(?:itude)?["']?\s*:\s*(-?[\d.]+)""".toRegex()
+            
+            var jsonMatches = latLngObjRegex.findAll(gpxText)
+            for (match in jsonMatches) {
+                val lat = match.groupValues[1].toDoubleOrNull()
+                val lng = match.groupValues[2].toDoubleOrNull()
+                if (lat != null && lng != null) {
+                    points.add(RoutePoint(lat, lng))
+                }
+            }
+            if (points.isEmpty()) {
+                jsonMatches = lngLatObjRegex.findAll(gpxText)
+                for (match in jsonMatches) {
+                    val lng = match.groupValues[1].toDoubleOrNull()
+                    val lat = match.groupValues[2].toDoubleOrNull()
+                    if (lat != null && lng != null) {
+                        points.add(RoutePoint(lat, lng))
+                    }
+                }
+            }
+            
+            if (points.isEmpty()) {
+                // Try array pairs: [12.34, 56.78] or [12.34,56.78]
+                val arrayPairRegex = """\[\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*\]""".toRegex()
+                val arrayMatches = arrayPairRegex.findAll(gpxText)
+                for (match in arrayMatches) {
+                    val lat = match.groupValues[1].toDoubleOrNull()
+                    val lng = match.groupValues[2].toDoubleOrNull()
+                    if (lat != null && lng != null) {
+                        points.add(RoutePoint(lat, lng))
+                    }
+                }
+            }
         }
-
+        
+        // 3. Try raw decimal lines/coordinates (e.g. "45.123 12.456" or "45.123,12.456" line-by-line)
+        if (points.isEmpty()) {
+            val lines = gpxText.lines()
+            for (line in lines) {
+                val trimmed = line.trim()
+                if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("//") || trimmed.startsWith("<")) continue
+                val rowCoordsRegex = """^(-?\d+\.\d+)(?:[\s,;|]+)(-?\d+\.\d+)""".toRegex()
+                val match = rowCoordsRegex.find(trimmed)
+                if (match != null) {
+                    val lat = match.groupValues[1].toDoubleOrNull()
+                    val lng = match.groupValues[2].toDoubleOrNull()
+                    if (lat != null && lng != null) {
+                        if (lat in -90.0..90.0 && lng in -180.0..180.0) {
+                            points.add(RoutePoint(lat, lng))
+                        }
+                    }
+                }
+            }
+        }
+        
+        if (points.size < 2) {
+            return "Failed to import: Found less than 2 tracking nodes in GPX/GP ride format."
+        }
+        
         val distance = calculatePathDistance(points)
         val name = if (!customName.isNullOrBlank()) {
             customName
         } else {
-            // Find name tags in XML
+            // Find name tags in XML if available
             val nameRegex = """<name>(.*?)</name>""".toRegex()
             val nameMatch = nameRegex.find(gpxText)
-            nameMatch?.groupValues?.get(1) ?: "GPX Import - ${SimpleDateFormat("MMM d", Locale.getDefault()).format(Date())}"
+            nameMatch?.groupValues?.get(1)?.trim() ?: "Uploaded Ride - ${SimpleDateFormat("MMM d", Locale.getDefault()).format(Date())}"
         }
 
         val route = Route(

@@ -19,6 +19,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -317,6 +318,7 @@ fun RoadTrackerApp(
 
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val isLightMap by viewModel.isLightMap.collectAsStateWithLifecycle()
+    val mapStyle by viewModel.mapStyle.collectAsStateWithLifecycle()
     var showSyncDialog by remember { mutableStateOf(false) }
 
     // Trigger Permission Launcher
@@ -413,10 +415,15 @@ fun RoadTrackerApp(
     val totalDistance = routes.sumOf { it.distance }
     val totalRidesCount = routes.size
 
+    val hasAcceptedSafetyTerms by viewModel.hasAcceptedSafetyTerms.collectAsStateWithLifecycle()
     val sessionStatus by com.example.data.SupabaseManager.sessionState.collectAsStateWithLifecycle()
     var demoBypass by remember { mutableStateOf(false) }
 
-    if (sessionStatus !is io.github.jan.supabase.auth.status.SessionStatus.Authenticated && !demoBypass) {
+    if (!hasAcceptedSafetyTerms) {
+        SafetyDisclaimerOverlay(
+            onAccept = { viewModel.acceptSafetyTerms() }
+        )
+    } else if (sessionStatus !is io.github.jan.supabase.auth.status.SessionStatus.Authenticated && !demoBypass) {
         GoogleSignInScreen(
             onSignInClick = onSignInClick,
             onDemoBypassClick = { demoBypass = true }
@@ -1058,19 +1065,31 @@ fun RoadTrackerApp(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    // Map Theme Toggle Button
+                    // Map Theme Toggle Button (Dark, Light, Terrain)
                     FloatingActionButton(
                         onClick = {
                             viewModel.toggleMapTheme()
                         },
-                        containerColor = if (isLightMap) Color(0xFFFFD166) else SlateCockpitSurface,
-                        contentColor = if (isLightMap) DeepDarkBackground else Color.White,
+                        containerColor = when (mapStyle) {
+                            "light" -> Color(0xFFFFD166)
+                            "terrain" -> NeonGreen.copy(alpha = 0.2f)
+                            else -> SlateCockpitSurface
+                        },
+                        contentColor = when (mapStyle) {
+                            "light" -> DeepDarkBackground
+                            "terrain" -> NeonGreen
+                            else -> Color.White
+                        },
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
-                            imageVector = if (isLightMap) Icons.Default.DarkMode else Icons.Default.LightMode,
-                            contentDescription = "Toggle Map Theme",
+                            imageVector = when (mapStyle) {
+                                "light" -> Icons.Default.LightMode
+                                "terrain" -> Icons.Default.Terrain
+                                else -> Icons.Default.DarkMode
+                            },
+                            contentDescription = "Toggle Map Theme: Dark, Light, Terrain",
                             modifier = Modifier.size(22.dp)
                         )
                     }
@@ -1463,12 +1482,12 @@ fun RoadTrackerApp(
                                 ) {
                                     // Custom Import GPX Route Button
                                     TextButton(
-                                        onClick = { gpxPickerLauncher.launch("application/gpx+xml") },
+                                        onClick = { gpxPickerLauncher.launch("*/*") },
                                         colors = ButtonDefaults.textButtonColors(contentColor = NeonGreen)
                                     ) {
-                                        Icon(Icons.Default.UploadFile, contentDescription = "Import Tracker GPX", modifier = Modifier.size(15.dp))
+                                        Icon(Icons.Default.UploadFile, contentDescription = "Import Tracker GP/GPX", modifier = Modifier.size(15.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("IMPORT GPX", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text("IMPORT GP/GPX", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
 
                                     // Export All Data Button
@@ -2514,3 +2533,175 @@ fun GoogleDeveloperErrorDialog(
         }
     )
 }
+
+@Composable
+fun SafetyDisclaimerOverlay(
+    onAccept: () -> Unit
+) {
+    var isChecked by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(DeepDarkBackground)
+            .padding(16.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(SlateCockpitSurface)
+                .border(2.dp, GeometricBorder, RoundedCornerShape(24.dp))
+                .padding(24.dp)
+        ) {
+            // Header
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(NeonPink.copy(alpha = 0.15f))
+                        .border(1.dp, NeonPink, RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Warning icon",
+                        tint = NeonPink,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "SAFETY COCKPIT AGREEMENT",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        letterSpacing = 1.sp
+                    )
+                    Text(
+                        text = "Velocitron Liability & Riding Charter",
+                        fontSize = 11.sp,
+                        color = TextMuted
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Body text inside Scrollable Column
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.Black.copy(alpha = 0.4f))
+                    .border(1.dp, GeometricBorder, RoundedCornerShape(14.dp))
+                    .padding(16.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    text = "ROAD SAFETY WAIVER & AUTHOR PROTECTION",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CockpitOrange,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Text(
+                    text = "1. INSTALLATION RESPONSIBILITY: Only the person installing and configuring this application is fully responsible and liable for the setup, mounting on the motorcycle dashboard, and proper use of it. No author of this application will be held liable under any circumstances for mounting failure, distraction, or usage consequences.",
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Text(
+                    text = "2. ZERO VISUAL DISTRACTION MANDATE: You are strictly commanded and required to avoid looking at the screen under any condition while riding. Do NOT touch, click, or interact with this application while moving on public roads. Mount the smartphone securely using an approved mechanical lock and inspect charts, maps, or telemetry logs ONLY when fully stopped and safely parked off the path.",
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Text(
+                    text = "3. SYSTEM AS-IS SPECIFICATION: Telemetry values, including Euler-calculated lateral turn tilt banking, elevator climbing, dynamic speeds, and peak G indicators, are mathematically simulated estimates pulled from consumer hardware sensors. This application is an entertainment and telemetry analysis tool designed mainly for offline private close-tracks. No safety guarantees of accuracy are offered.",
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                Text(
+                    text = "4. IRREVOCABLE LEGAL RELEASE: By agreeing and clicking launch, you completely release and absolve the developers, maintainers, and distributors of Road Tracker (Velocitron) from any and all claims, lawsuits, financial losses, medical injuries, crashes, material failures, or fatalities. You ride entirely at your own hazard and discretion.",
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Checkbox Confirmation Row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { isChecked = !isChecked }
+                    .padding(vertical = 4.dp)
+            ) {
+                Checkbox(
+                    checked = isChecked,
+                    onCheckedChange = { isChecked = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = NeonGreen,
+                        uncheckedColor = TextMuted,
+                        checkmarkColor = DeepDarkBackground
+                    ),
+                    modifier = Modifier.testTag("disclaimer_checkbox")
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "Only the installer is responsible for app use. I will NOT look at the screen while riding and I fully release the authors from any claims.",
+                    fontSize = 11.sp,
+                    color = Color.White,
+                    lineHeight = 14.sp,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            // Accept and Enter Button
+            Button(
+                onClick = onAccept,
+                enabled = isChecked,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = NeonGreen,
+                    contentColor = DeepDarkBackground,
+                    disabledContainerColor = SlateCockpitSurface.copy(alpha = 0.5f),
+                    disabledContentColor = TextMuted
+                ),
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .testTag("accept_disclaimer_button")
+            ) {
+                Text(
+                    text = "AGREE & ENTER COCKPIT",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 1.sp
+                )
+            }
+        }
+    }
+}
+

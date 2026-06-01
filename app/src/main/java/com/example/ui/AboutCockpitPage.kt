@@ -39,7 +39,7 @@ fun AboutCockpitPage(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var activeTabIndex by remember { mutableStateOf(0) } // 0: Features, 1: Specs, 2: Diagnostics
+    var activeTabIndex by remember { mutableStateOf(0) } // 0: Features, 1: Specs, 2: Safety & Terms, 3: Diagnostics
     var liveGlowVal by remember { mutableStateOf(1.0f) }
 
     // Start a simple coroutine to pulsate sensor signals
@@ -97,7 +97,7 @@ fun AboutCockpitPage(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = "VER: 2.4.0-RC",
+                            text = "VER: 2.6.0-RC",
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             color = ElectricCyan,
@@ -219,7 +219,7 @@ fun AboutCockpitPage(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
                     modifier = Modifier
-                        .weight(1.1f)
+                        .weight(1.2f)
                         .testTag("about_specs_tab")
                 ) {
                     Text("Spec & Physics", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
@@ -235,9 +235,24 @@ fun AboutCockpitPage(
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
                     modifier = Modifier
                         .weight(1f)
+                        .testTag("about_safety_tab")
+                ) {
+                    Text("Safety", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                }
+
+                Button(
+                    onClick = { activeTabIndex = 3 },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (activeTabIndex == 3) ElectricCyan else Color.Transparent,
+                        contentColor = if (activeTabIndex == 3) DeepDarkBackground else Color.White
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+                    modifier = Modifier
+                        .weight(1.1f)
                         .testTag("about_diagnostics_tab")
                 ) {
-                    Text("Diag Console", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
+                    Text("Diag Logs", fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1)
                 }
             }
 
@@ -284,6 +299,14 @@ fun AboutCockpitPage(
                             icon = Icons.Default.CloudQueue,
                             color = NeonGreen,
                             tag = "04"
+                        )
+
+                        FeatureShowcaseRow(
+                            title = "Universal Ride & GP GPX Loader",
+                            desc = "Uploads and parses external ride files, GP logs, or raw coordinates lists and maps them directly onto offline base layers.",
+                            icon = Icons.Default.UploadFile,
+                            color = ElectricCyan,
+                            tag = "05"
                         )
                     }
                 } else if (tabIndex == 1) {
@@ -353,6 +376,79 @@ fun AboutCockpitPage(
                                     fontFamily = FontFamily.Monospace
                                 )
                             }
+                        }
+                    }
+                } else if (tabIndex == 2) {
+                    // --- SAFETY CHARTER & LIABILITY REGULATION ---
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, GeometricBorder, RoundedCornerShape(20.dp)),
+                        colors = CardDefaults.cardColors(containerColor = SlateCockpitSurface),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(20.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Gavel,
+                                    contentDescription = "Law and Safety",
+                                    tint = NeonPink,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    "SAFETY & LEGAL DISCLAIMERS",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = NeonPink,
+                                    letterSpacing = 1.2.sp
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Text(
+                                text = "LEGAL STATUTORY TERMS & CONDITIONS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CockpitOrange,
+                                letterSpacing = 0.5.sp,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+
+                            Text(
+                                text = "• INSTALLER RESPONSIBILITY:\nThe person downloading, executing, or installing this software application is solely and exclusively responsible for the proper installation, mounting, and subsequent use of the application.",
+                                fontSize = 11.5.sp,
+                                color = Color.White,
+                                lineHeight = 16.sp,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+
+                            Text(
+                                text = "• NO SCREEN WATCHING WHILE MOVING:\nYou are strictly forbidden from looking at the screen, clicking options, or interacting with telemetry controls while the motorcycle engine is active or moving. Secure the device to an approved motorcycle handlebar mount and query paths or logs only when parked.",
+                                fontSize = 11.5.sp,
+                                color = Color.White,
+                                lineHeight = 16.sp,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+
+                            Text(
+                                text = "• ABSOLUTE CREATOR INDEMNIFICATION:\nThe builders, contributors, and legal authors of Road Tracker (Velocitron) are 100% exempt from, protected against, and legally released from any claims, medical injuries, crashes, material failures, property damage, hardware wear, or fatalities that result directly or indirectly from using this app.",
+                                fontSize = 11.5.sp,
+                                color = Color.White,
+                                lineHeight = 16.sp,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+
+                            Text(
+                                text = "• ENTERTAINMENT SENSOR LIMITATION:\nAll calculated values, including dynamic Euler corner lean degrees, acceleration rate peaks, climb levels, or speed estimates, are mathematical models pulled from standard client mobile sensors and might be imprecise. Designed primarily for private track diagnostic evaluation.",
+                                fontSize = 11.5.sp,
+                                color = Color.White,
+                                lineHeight = 16.sp
+                            )
                         }
                     }
                 } else {
