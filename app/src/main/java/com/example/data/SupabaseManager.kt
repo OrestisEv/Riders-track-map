@@ -130,6 +130,18 @@ object SupabaseManager {
         return name ?: user.email?.substringBefore("@")
     }
 
+    fun isUsingPlaceholderCredentials(): Boolean {
+        val url = BuildConfig.SUPABASE_URL
+        val anonKey = BuildConfig.SUPABASE_ANON_KEY
+        return url.isBlank() || 
+               url == "https://your-project.supabase.co" || 
+               url.contains("placeholder") || 
+               url.contains("your-project") || 
+               anonKey.isBlank() || 
+               anonKey == "your-supabase-anon-key" || 
+               anonKey == "dummy-key"
+    }
+
     suspend fun loginWithGoogleOAuth() {
         try {
             DebugLogger.i("SUPABASE", "Signing in to Supabase via Google Browser OAuth...")

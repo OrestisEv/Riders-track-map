@@ -171,6 +171,8 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             MyApplicationTheme {
+                val showSupabasePlaceholderWarningDialog = remember { mutableStateOf(false) }
+
                 Box(modifier = Modifier.fillMaxSize()) {
                     RoadTrackerApp(
                         viewModel = viewModel,
@@ -179,11 +181,15 @@ class MainActivity : ComponentActivity() {
                         onStopLocationUpdates = { stopLocationUpdates() },
                         onFetchLastLocation = { forceCenter -> fetchLastKnownLocation(forceCenter) },
                         onSignInClick = {
-                            lifecycleScope.launch {
-                                try {
-                                    com.example.data.SupabaseManager.loginWithGoogleOAuth()
-                                } catch (e: Exception) {
-                                    Toast.makeText(this@MainActivity, "OAuth failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            if (com.example.data.SupabaseManager.isUsingPlaceholderCredentials()) {
+                                showSupabasePlaceholderWarningDialog.value = true
+                            } else {
+                                lifecycleScope.launch {
+                                    try {
+                                        com.example.data.SupabaseManager.loginWithGoogleOAuth()
+                                    } catch (e: Exception) {
+                                        Toast.makeText(this@MainActivity, "OAuth failed: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                                    }
                                 }
                             }
                         },
@@ -198,6 +204,12 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     )
+
+                    if (showSupabasePlaceholderWarningDialog.value) {
+                        SupabasePlaceholderWarningDialog(
+                            onDismiss = { showSupabasePlaceholderWarningDialog.value = false }
+                        )
+                    }
 
                     if (showDeveloperErrorDialog.value) {
                         GoogleDeveloperErrorDialog(
@@ -2238,7 +2250,45 @@ fun GoogleSignInScreen(
                 textAlign = TextAlign.Center
             )
             
-            Spacer(modifier = Modifier.height(48.dp))
+            val isUsingPlaceholder = com.example.data.SupabaseManager.isUsingPlaceholderCredentials()
+            if (isUsingPlaceholder) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFE9A13F).copy(alpha = 0.15f))
+                        .border(1.dp, Color(0xFFE9A13F).copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        .padding(14.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Icon(
+                            imageVector = Icons.Default.Warning,
+                            contentDescription = "Warning",
+                            tint = Color(0xFFFFC107),
+                            modifier = Modifier.size(20.dp).offset(y = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "Setup Required for Cloud Auth",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "The app is currently configured with placeholder Supabase credentials (your-project.supabase.co).\n\nPlease use the 'Offline Cockpit Mode' or configure your custom database keys via the Secrets panel in AI Studio.",
+                                fontSize = 10.5.sp,
+                                color = TextSilver,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            } else {
+                Spacer(modifier = Modifier.height(48.dp))
+            }
             
             // Cockpit themed continue with google button
             OutlinedButton(
@@ -2470,6 +2520,91 @@ fun GoogleDeveloperErrorDialog(
                 colors = ButtonDefaults.textButtonColors(contentColor = ElectricCyan)
             ) {
                 Text("Dismiss", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
+}
+
+@Composable
+fun SupabasePlaceholderWarningDialog(
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SlateCockpitSurface,
+        titleContentColor = Color.White,
+        textContentColor = TextSilver,
+        tonalElevation = 8.dp,
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = "Configuration Needed",
+                    tint = Color(0xFFFFC107),
+                    modifier = Modifier.size(28.dp)
+                )
+                Text(
+                    text = "Supabase Config Required",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "This app is configured to use Supabase for online sync, but it's currently using default placeholder credentials (your-project.supabase.co).",
+                    fontSize = 14.sp,
+                    color = TextSilver
+                )
+                
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(DeepDarkBackground, RoundedCornerShape(8.dp))
+                        .border(1.dp, GeometricBorder, RoundedCornerShape(8.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "HOW TO CONNECT THE DATABASE:",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ElectricCyan,
+                        letterSpacing = 0.5.sp
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "1. Unfold the Secrets tab in AI Studio.\n" +
+                               "2. Ensure you have added real values for SUPABASE_URL and SUPABASE_ANON_KEY from your Supabase Project dashboard.\n" +
+                               "3. Recompile/Run the app after adding them.",
+                        fontSize = 12.sp,
+                        color = TextMuted,
+                        lineHeight = 16.sp
+                    )
+                }
+                
+                Text(
+                    text = "No database? No problem! Select \"Launch Offline Cockpit Mode\" on the login screen to enjoy all cockpit/telemetry features locally.",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = NeonGreen,
+                    lineHeight = 18.sp
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(contentColor = ElectricCyan)
+            ) {
+                Text("Got It", fontWeight = FontWeight.Bold)
             }
         }
     )
