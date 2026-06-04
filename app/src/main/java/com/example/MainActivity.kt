@@ -72,7 +72,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var viewModel: RoadTrackerViewModel
 
-    private val currentUserLocation = mutableStateOf<RoutePoint?>(null)
+    companion object {
+        val currentUserLocation = mutableStateOf<RoutePoint?>(null)
+    }
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
@@ -163,9 +165,34 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             viewModel.isTracking.collectLatest { tracking ->
                 if (tracking) {
-                    startLocationUpdates()
+                    TrackingService.activeViewModel = viewModel
+                    
+                    // Stop MainActivity local updates to avoid duplicate location updates
+                    try {
+                        fusedLocationClient.removeLocationUpdates(locationCallback)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    
+                    // Start Foreground Service for continuous GPS tracking even when screen is off
+                    val serviceIntent = Intent(this@MainActivity, TrackingService::class.java).apply {
+                        action = TrackingService.ACTION_START_TRACKING
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent)
+                    } else {
+                        startService(serviceIntent)
+                    }
                 } else {
-                    stopLocationUpdates()
+                    // Stop Foreground Service
+                    val serviceIntent = Intent(this@MainActivity, TrackingService::class.java).apply {
+                        action = TrackingService.ACTION_STOP_TRACKING
+                    }
+                    startService(serviceIntent)
+                    TrackingService.activeViewModel = null
+                    
+                    // Resume local MainActivity location updates
+                    startLocationUpdates()
                 }
             }
         }
@@ -319,6 +346,8 @@ fun RoadTrackerApp(
     val syncStatus by viewModel.syncStatus.collectAsStateWithLifecycle()
     val isLightMap by viewModel.isLightMap.collectAsStateWithLifecycle()
     val mapStyle by viewModel.mapStyle.collectAsStateWithLifecycle()
+    val gpsAccuracyPreset by viewModel.gpsAccuracyPreset.collectAsStateWithLifecycle()
+    val isTelemetryEnabled by viewModel.isTelemetryEnabled.collectAsStateWithLifecycle()
     var showSyncDialog by remember { mutableStateOf(false) }
 
     // Trigger Permission Launcher
@@ -337,12 +366,14 @@ fun RoadTrackerApp(
 
     // Auto trigger on launch
     LaunchedEffect(Unit) {
-        permissionLauncher.launch(
-            arrayOf(
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION
-            )
+        val permissions = mutableListOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
+        if (android.os.Build.VERSION.SDK_INT >= 33) { // 33 is API level for POST_NOTIFICATIONS
+            permissions.add("android.permission.POST_NOTIFICATIONS")
+        }
+        permissionLauncher.launch(permissions.toTypedArray())
     }
 
     // Filtering states
@@ -2051,14 +2082,14 @@ fun RoadTrackerApp(
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.AccountCircle,
-                        contentDescription = "Profile Icon",
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings Icon",
                         tint = ElectricCyan,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "CLOUD SYNC PROFILE",
+                        text = "COCKPIT & SYNC SETTINGS",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -2067,7 +2098,7 @@ fun RoadTrackerApp(
                 }
             },
             text = {
-                Column(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
                     Text(
                         text = if (isUserAuthenticated) {
                             "Your routes are secured by your Google account and synced to Supabase database."
@@ -2146,7 +2177,192 @@ fun RoadTrackerApp(
                         )
                     }
                     
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // SECTION: COCKPIT PERFORMANCE CONFIGURATION
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(DeepDarkBackground)
+                            .border(1.dp, GeometricBorder, RoundedCornerShape(14.dp))
+                            .padding(14.dp)
+                    ) {
+                        Text(
+                            text = "COCKPIT PERFORMANCE CONFIG",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ElectricCyan,
+                            letterSpacing = 0.8.sp,
+                            modifier = Modifier.padding(bottom = 12.dp)
+                        )
+
+                        // --- SLIDER 1: GPS ACCURACY ---
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.GpsFixed,
+                                    contentDescription = "GPS Accuracy Icon",
+                                    tint = CockpitOrange,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "GPS ACCURACY PROFILE",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            var localGpsVal by remember(gpsAccuracyPreset) { mutableStateOf(gpsAccuracyPreset.toFloat()) }
+                            Slider(
+                                value = localGpsVal,
+                                onValueChange = { localGpsVal = it },
+                                onValueChangeFinished = {
+                                    viewModel.setGpsAccuracyPreset(localGpsVal.toInt())
+                                },
+                                valueRange = 0f..2f,
+                                steps = 1,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = CockpitOrange,
+                                    activeTrackColor = CockpitOrange,
+                                    inactiveTrackColor = GeometricBorder,
+                                    activeTickColor = Color.Transparent,
+                                    inactiveTickColor = Color.Transparent
+                                ),
+                                modifier = Modifier.testTag("setting_gps_slider")
+                            )
+
+                            val gpsDescription = when (localGpsVal.toInt()) {
+                                0 -> "Low Battery • Collects start-end points; snap computes likely path (OSRM)."
+                                1 -> "Mix Standard • Syncs background GPS every 5 minutes & snaps roads."
+                                else -> "Max Precision • Multi-track high frequency continuous live recordings."
+                            }
+                            val gpsBadgeColor = when (localGpsVal.toInt()) {
+                                0 -> NeonGreen
+                                1 -> ElectricCyan
+                                else -> CockpitOrange
+                            }
+                            val gpsBadgeText = when (localGpsVal.toInt()) {
+                                0 -> "LOW (BATTERY SAVER)"
+                                1 -> "MIX (BALANCED ROUTE)"
+                                else -> "MAX (HIGH PRECISION)"
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = gpsBadgeText,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = gpsBadgeColor,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Text(
+                                    text = "Preset ${localGpsVal.toInt()}",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = TextMuted
+                                )
+                            }
+
+                            Text(
+                                text = gpsDescription,
+                                fontSize = 10.5.sp,
+                                color = TextSilver,
+                                lineHeight = 14.sp,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 14.dp)
+                            )
+                        }
+
+                        Divider(color = GeometricBorder, thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
+
+                        // --- SLIDER 2: TELEMETRY HARVESTING ---
+                        Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Sensors,
+                                    contentDescription = "Telemetry Sensor Icon",
+                                    tint = if (isTelemetryEnabled) NeonGreen else TextMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "TELEMETRY & CORNERING SENSORS",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            var localTelemetryVal by remember(isTelemetryEnabled) { mutableStateOf(if (isTelemetryEnabled) 1f else 0f) }
+                            Slider(
+                                value = localTelemetryVal,
+                                onValueChange = { localTelemetryVal = it },
+                                onValueChangeFinished = {
+                                    viewModel.setTelemetryEnabled(localTelemetryVal == 1f)
+                                },
+                                valueRange = 0f..1f,
+                                steps = 0,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = if (localTelemetryVal == 1f) NeonGreen else TextMuted,
+                                    activeTrackColor = NeonGreen,
+                                    inactiveTrackColor = GeometricBorder
+                                ),
+                                modifier = Modifier.testTag("setting_telemetry_slider")
+                            )
+
+                            val telemetryDescription = if (localTelemetryVal == 1f) {
+                                "On • Tracking lean angles (Euler formulas), peak G-Forces & dynamic acceleration."
+                            } else {
+                                "Off • Core accelerometer deactivated. Accelerations & lean degrees are disabled."
+                            }
+                            
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (localTelemetryVal == 1f) "ACTIVE SEEDING DETECTOR" else "DECELERATION SUSPENDED",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (localTelemetryVal == 1f) NeonGreen else TextMuted,
+                                    letterSpacing = 0.5.sp
+                                )
+                                Text(
+                                    text = if (localTelemetryVal == 1f) "ENABLED" else "DISABLED",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (localTelemetryVal == 1f) NeonGreen else TextMuted
+                                )
+                            }
+
+                            Text(
+                                text = telemetryDescription,
+                                fontSize = 10.5.sp,
+                                color = TextSilver,
+                                lineHeight = 14.sp,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
                     
                     if (isUserAuthenticated) {
                         val pendingOps = com.example.data.SupabaseManager.getPendingOperationsCount()

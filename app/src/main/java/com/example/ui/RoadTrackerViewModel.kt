@@ -70,6 +70,24 @@ class RoadTrackerViewModel(
         sharedPrefs.edit().putBoolean("has_accepted_safety_terms_v2", true).apply()
     }
 
+    private val _gpsAccuracyPreset = MutableStateFlow(sharedPrefs.getInt("gps_accuracy_preset", 2))
+    val gpsAccuracyPreset: StateFlow<Int> = _gpsAccuracyPreset.asStateFlow()
+
+    fun setGpsAccuracyPreset(preset: Int) {
+        _gpsAccuracyPreset.value = preset
+        sharedPrefs.edit().putInt("gps_accuracy_preset", preset).apply()
+        DebugLogger.i("SETTINGS", "GPS Accuracy preset changed to: $preset")
+    }
+
+    private val _isTelemetryEnabled = MutableStateFlow(sharedPrefs.getBoolean("is_telemetry_enabled", true))
+    val isTelemetryEnabled: StateFlow<Boolean> = _isTelemetryEnabled.asStateFlow()
+
+    fun setTelemetryEnabled(enabled: Boolean) {
+        _isTelemetryEnabled.value = enabled
+        sharedPrefs.edit().putBoolean("is_telemetry_enabled", enabled).apply()
+        DebugLogger.i("SETTINGS", "Telemetry data recording flag toggled to: $enabled")
+    }
+
     init {
         // Safe placeholder
     }
@@ -358,7 +376,9 @@ class RoadTrackerViewModel(
         _maxSpeed.value = 0.0
         _activeTelemetrySamples.value = emptyList()
 
-        sensorManager?.registerListener(sensorListener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+        if (_isTelemetryEnabled.value) {
+            sensorManager?.registerListener(sensorListener, accelerometer, SensorManager.SENSOR_DELAY_UI)
+        }
     }
 
     private fun unregisterSensors() {
@@ -382,7 +402,7 @@ class RoadTrackerViewModel(
                 _elapsedSeconds.value = elapsed
 
                 // Simulate altitude/lean/G values if real sensors are static/missing (for testing & dashboard previews)
-                if (accelerometer == null || _currentLeanAngle.value == 0.0) {
+                if (_isTelemetryEnabled.value && (accelerometer == null || _currentLeanAngle.value == 0.0)) {
                     val wave = Math.sin(elapsed.toDouble() / 5.0)
                     val simulatedLean = Math.abs(wave * 28.0) + (1..3).random()
                     _currentLeanAngle.value = simulatedLean
@@ -404,14 +424,16 @@ class RoadTrackerViewModel(
                 }
 
                 // Append telemetry live sample
-                val sample = TelemetrySample(
-                    timeSec = elapsed,
-                    speedKmh = _currentSpeedKmh.value,
-                    leanAngle = _currentLeanAngle.value,
-                    gForce = _currentGForce.value,
-                    altitude = _currentAltitude.value
-                )
-                _activeTelemetrySamples.value = _activeTelemetrySamples.value + sample
+                if (_isTelemetryEnabled.value) {
+                    val sample = TelemetrySample(
+                        timeSec = elapsed,
+                        speedKmh = _currentSpeedKmh.value,
+                        leanAngle = _currentLeanAngle.value,
+                        gForce = _currentGForce.value,
+                        altitude = _currentAltitude.value
+                    )
+                    _activeTelemetrySamples.value = _activeTelemetrySamples.value + sample
+                }
 
                 // Periodically check Power Saver triggers
                 evaluatePowerSaver()
@@ -502,8 +524,13 @@ class RoadTrackerViewModel(
             customName
         }
 
+        val isTelemetry = _isTelemetryEnabled.value
         val avgSp = if (_elapsedSeconds.value > 0) (dist / (_elapsedSeconds.value / 3600.0)) else 0.0
-        val serializedTelemetry = JsonHelper.telemetryToJson(_activeTelemetrySamples.value)
+        val serializedTelemetry = if (isTelemetry) {
+            JsonHelper.telemetryToJson(_activeTelemetrySamples.value)
+        } else {
+            "[]"
+        }
 
         val route = Route(
             id = generateUniqueId(),
@@ -513,11 +540,11 @@ class RoadTrackerViewModel(
             distance = dist,
             mode = "gps",
             durationSeconds = _elapsedSeconds.value,
-            maxSpeed = _maxSpeed.value,
+            maxSpeed = if (isTelemetry) _maxSpeed.value else 0.0,
             avgSpeed = avgSp,
-            maxLeanAngle = Math.max(_maxLeftLean.value, _maxRightLean.value),
-            maxGForce = _maxGForce.value,
-            elevationGain = _elevationGain.value,
+            maxLeanAngle = if (isTelemetry) Math.max(_maxLeftLean.value, _maxRightLean.value) else 0.0,
+            maxGForce = if (isTelemetry) _maxGForce.value else 0.0,
+            elevationGain = if (isTelemetry) _elevationGain.value else 0.0,
             telemetryJson = serializedTelemetry
         )
 
@@ -527,6 +554,25 @@ class RoadTrackerViewModel(
                 repository.insert(route)
                 DebugLogger.sys("DATABASE", "Route '${route.name}' successfully committed to Room DB. Syncing with Supabase...")
                 com.example.data.SupabaseManager.executeInsert(route)
+                
+                // If GPS preset is Low (0) or Mix (1), perform async snapping to road via OSRM to generate the full high-fidelity route
+                val accuracyPreset = _gpsAccuracyPreset.value
+                if (accuracyPreset == 0 || accuracyPreset == 1) {
+                    DebugLogger.i("GPS", "Low/Mix Accuracy: Initiating asynchronous OSRM snapping for '${route.name}' with ${points.size} coordinates.")
+                    val snapped = fetchRoadRouteMulti(points)
+                    if (snapped.isNotEmpty() && snapped != points) {
+                        val snappedDist = calculatePathDistance(snapped)
+                        val snappedRoute = route.copy(
+                            coordinates = snapped,
+                            distance = snappedDist
+                        )
+                        repository.insert(snappedRoute)
+                        com.example.data.SupabaseManager.executeInsert(snappedRoute)
+                        DebugLogger.sys("GPS", "Asynchronous OSRM snapping complete. '${route.name}' updated in Local DB and Supabase with ${snapped.size} points (${String.format(Locale.US, "%.2f km", snappedDist)})")
+                    } else {
+                        DebugLogger.w("GPS", "Low/Mix Accuracy: OSRM snapping fetched empty or identical track points.")
+                    }
+                }
             } catch (e: Exception) {
                 DebugLogger.e("DATABASE", "CRITICAL error occurred while saving tracking route: '${route.name}'", e)
             }
