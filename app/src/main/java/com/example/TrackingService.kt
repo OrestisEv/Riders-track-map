@@ -20,6 +20,7 @@ class TrackingService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private var wakeLock: PowerManager.WakeLock? = null
+    private var serviceHandlerThread: android.os.HandlerThread? = null
 
     private val locationCallback = object : LocationCallback() {
         override fun onLocationResult(locationResult: LocationResult) {
@@ -50,6 +51,12 @@ class TrackingService : Service() {
         super.onCreate()
         DebugLogger.sys("TRACKING_SERVICE", "TrackingService onCreate - initializing providers.")
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+        
+        // Setup a dedicated HandlerThread to process GPS location callbacks on a background thread.
+        // This ensures updates are processed continuously even if the main UI Thread looper is throttled or suspended when screen is turned off.
+        serviceHandlerThread = android.os.HandlerThread("TrackingServiceLocationThread").apply {
+            start()
+        }
         
         // Setup WakeLock to keep CPU awake during long foreground rides so GPS keeps tracking with screen off
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -131,7 +138,15 @@ class TrackingService : Service() {
             .setOngoing(true)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -170,11 +185,12 @@ class TrackingService : Service() {
             setMinUpdateDistanceMeters(minDistance)
         }.build()
 
+        val looper = serviceHandlerThread?.looper ?: android.os.Looper.getMainLooper()
         try {
             fusedLocationClient.requestLocationUpdates(
                 locationRequest,
                 locationCallback,
-                android.os.Looper.getMainLooper()
+                looper
             )
         } catch (e: Exception) {
             DebugLogger.e("TRACKING_SERVICE", "Failed to start location updates in service", e)
@@ -189,6 +205,8 @@ class TrackingService : Service() {
     override fun onDestroy() {
         DebugLogger.sys("TRACKING_SERVICE", "Destroying tracking service. Releasing resources.")
         stopLocationUpdates()
+        serviceHandlerThread?.quitSafely()
+        serviceHandlerThread = null
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }

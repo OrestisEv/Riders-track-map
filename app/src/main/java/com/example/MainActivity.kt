@@ -464,6 +464,9 @@ fun RoadTrackerApp(
             modifier = Modifier.fillMaxSize(),
             contentWindowInsets = WindowInsets.statusBars
         ) { innerPadding ->
+        val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+        val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -474,11 +477,14 @@ fun RoadTrackerApp(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                    .clip(RoundedCornerShape(24.dp))
+                    .padding(
+                        horizontal = if (isLandscape) 12.dp else 16.dp,
+                        vertical = if (isLandscape) 4.dp else 12.dp
+                    )
+                    .clip(RoundedCornerShape(if (isLandscape) 14.dp else 24.dp))
                     .background(SlateCockpitSurface)
-                    .border(1.dp, GeometricBorder, RoundedCornerShape(24.dp))
-                    .padding(16.dp)
+                    .border(1.dp, GeometricBorder, RoundedCornerShape(if (isLandscape) 14.dp else 24.dp))
+                    .padding(if (isLandscape) 8.dp else 16.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -622,11 +628,11 @@ fun RoadTrackerApp(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp)
-                    .padding(bottom = 12.dp)
-                    .clip(RoundedCornerShape(32.dp))
+                    .padding(horizontal = if (isLandscape) 6.dp else 12.dp)
+                    .padding(bottom = if (isLandscape) 6.dp else 12.dp)
+                    .clip(RoundedCornerShape(if (isLandscape) 16.dp else 32.dp))
                     .background(MapSubFrame)
-                    .border(1.5.dp, SlateCockpitSurface, RoundedCornerShape(32.dp))
+                    .border(1.5.dp, SlateCockpitSurface, RoundedCornerShape(if (isLandscape) 16.dp else 32.dp))
             ) {
                 // Interactive Leaflet Map Inside Frame
                 LeafletMapView(
@@ -978,179 +984,352 @@ fun RoadTrackerApp(
                         .align(if (isTracking) Alignment.BottomCenter else Alignment.BottomEnd)
                         .navigationBarsPadding()
                         .padding(
-                            bottom = if (isSheetExpanded) 360.dp else 16.dp,
-                            end = 16.dp,
+                            bottom = if (isSheetExpanded) {
+                                if (isLandscape) 110.dp else 360.dp
+                            } else {
+                                if (isLandscape) 8.dp else 16.dp
+                            },
+                            end = if (isLandscape) 12.dp else 16.dp,
                             start = if (isTracking) 16.dp else 0.dp
                         )
                         .then(if (isTracking) Modifier.fillMaxWidth() else Modifier),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(if (isLandscape) 6.dp else 10.dp),
                     horizontalAlignment = if (isTracking) Alignment.CenterHorizontally else Alignment.End
                 ) {
                     if (!isTracking) {
-                        // Location zoom controls
-                        FloatingActionButton(
-                            onClick = {
-                                onFetchLastLocation(true)
-                                currentUserLocation.value?.let {
-                                    viewModel.centerMapOn(it)
-                                }
-                            },
-                            containerColor = SlateCockpitSurface,
-                            contentColor = ElectricCyan,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.MyLocation,
-                                contentDescription = "Center Location",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        // Drawing toggle modes
-                        FloatingActionButton(
-                            onClick = {
-                                viewModel.toggleDrawingMode()
-                            },
-                            containerColor = if (isDrawingMode) CockpitOrange else SlateCockpitSurface,
-                            contentColor = if (isDrawingMode) DeepDarkBackground else CockpitOrange,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isDrawingMode) Icons.Default.Map else Icons.Default.Gesture,
-                                contentDescription = "Manual Drawing mode",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        // Saved routes list controller drawer button
-                        FloatingActionButton(
-                            onClick = {
-                                isSheetExpanded = !isSheetExpanded
-                            },
-                            containerColor = if (isSheetExpanded) ElectricCyan else SlateCockpitSurface,
-                            contentColor = if (isSheetExpanded) DeepDarkBackground else ElectricCyan,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isSheetExpanded) Icons.Default.Book else Icons.Default.History,
-                                contentDescription = "Ride Journal Panel",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        // Cloud Sync settings button
-                        FloatingActionButton(
-                            onClick = {
-                                showSyncDialog = true
-                            },
-                            containerColor = when (syncStatus) {
-                                "synced" -> NeonGreen.copy(alpha = 0.15f)
-                                "syncing" -> ElectricCyan.copy(alpha = 0.15f)
-                                "failed" -> NeonPink.copy(alpha = 0.15f)
-                                else -> SlateCockpitSurface
-                            },
-                            contentColor = when (syncStatus) {
-                                "synced" -> NeonGreen
-                                "syncing" -> ElectricCyan
-                                "failed" -> NeonPink
-                                else -> Color.White
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.size(48.dp)
-                                .border(
-                                    1.dp,
-                                    when (syncStatus) {
-                                        "synced" -> NeonGreen.copy(alpha = 0.5f)
-                                        "syncing" -> ElectricCyan.copy(alpha = 0.5f)
-                                        "failed" -> NeonPink.copy(alpha = 0.5f)
-                                        else -> Color.Transparent
+                        if (isLandscape) {
+                            // Landscape mode: sleek horizontal Row arrangement of buttons to avoid screen vertical cut-off
+                            Row(
+                                modifier = Modifier.wrapContentSize(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Location zoom controls
+                                FloatingActionButton(
+                                    onClick = {
+                                        onFetchLastLocation(true)
+                                        currentUserLocation.value?.let {
+                                            viewModel.centerMapOn(it)
+                                        }
                                     },
-                                    RoundedCornerShape(16.dp)
+                                    containerColor = SlateCockpitSurface,
+                                    contentColor = ElectricCyan,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.MyLocation,
+                                        contentDescription = "Center Location",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Drawing toggle modes
+                                FloatingActionButton(
+                                    onClick = {
+                                        viewModel.toggleDrawingMode()
+                                    },
+                                    containerColor = if (isDrawingMode) CockpitOrange else SlateCockpitSurface,
+                                    contentColor = if (isDrawingMode) DeepDarkBackground else CockpitOrange,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isDrawingMode) Icons.Default.Map else Icons.Default.Gesture,
+                                        contentDescription = "Manual Drawing mode",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Saved routes list controller drawer button
+                                FloatingActionButton(
+                                    onClick = {
+                                        isSheetExpanded = !isSheetExpanded
+                                    },
+                                    containerColor = if (isSheetExpanded) ElectricCyan else SlateCockpitSurface,
+                                    contentColor = if (isSheetExpanded) DeepDarkBackground else ElectricCyan,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSheetExpanded) Icons.Default.Book else Icons.Default.History,
+                                        contentDescription = "Ride Journal Panel",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Cloud Sync settings button
+                                FloatingActionButton(
+                                    onClick = {
+                                        showSyncDialog = true
+                                    },
+                                    containerColor = when (syncStatus) {
+                                        "synced" -> NeonGreen.copy(alpha = 0.15f)
+                                        "syncing" -> ElectricCyan.copy(alpha = 0.15f)
+                                        "failed" -> NeonPink.copy(alpha = 0.15f)
+                                        else -> SlateCockpitSurface
+                                    },
+                                    contentColor = when (syncStatus) {
+                                        "synced" -> NeonGreen
+                                        "syncing" -> ElectricCyan
+                                        "failed" -> NeonPink
+                                        else -> Color.White
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.size(44.dp)
+                                        .border(
+                                            1.dp,
+                                            when (syncStatus) {
+                                                "synced" -> NeonGreen.copy(alpha = 0.5f)
+                                                "syncing" -> ElectricCyan.copy(alpha = 0.5f)
+                                                "failed" -> NeonPink.copy(alpha = 0.5f)
+                                                else -> Color.Transparent
+                                            },
+                                            RoundedCornerShape(12.dp)
+                                        )
+                                ) {
+                                    Icon(
+                                        imageVector = when (syncStatus) {
+                                            "synced" -> Icons.Default.CloudDone
+                                            "syncing" -> Icons.Default.Sync
+                                            "failed" -> Icons.Default.CloudQueue
+                                            else -> Icons.Default.Cloud
+                                        },
+                                        contentDescription = "Cloud Storage Sync",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Telemetry Dashboard Cockpit Button
+                                FloatingActionButton(
+                                    onClick = {
+                                        showTelemetryPage = true
+                                    },
+                                    containerColor = SlateCockpitSurface,
+                                    contentColor = NeonPink,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.size(44.dp).testTag("telemetry_cockpit_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BarChart,
+                                        contentDescription = "Telemetry Cockpit Dashboard",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Map Theme Toggle Button (Dark, Light, Terrain)
+                                FloatingActionButton(
+                                    onClick = {
+                                        viewModel.toggleMapTheme()
+                                    },
+                                    containerColor = when (mapStyle) {
+                                        "light" -> Color(0xFFFFD166)
+                                        "terrain" -> NeonGreen.copy(alpha = 0.2f)
+                                        else -> SlateCockpitSurface
+                                    },
+                                    contentColor = when (mapStyle) {
+                                        "light" -> DeepDarkBackground
+                                        "terrain" -> NeonGreen
+                                        else -> Color.White
+                                    },
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.size(44.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = when (mapStyle) {
+                                            "light" -> Icons.Default.LightMode
+                                            "terrain" -> Icons.Default.Terrain
+                                            else -> Icons.Default.DarkMode
+                                        },
+                                        contentDescription = "Toggle Map Theme: Dark, Light, Terrain",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // Velocitron Manifesto/About Button
+                                FloatingActionButton(
+                                    onClick = {
+                                        showAboutPage = true
+                                    },
+                                    containerColor = SlateCockpitSurface,
+                                    contentColor = ElectricCyan,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.size(44.dp).testTag("about_cockpit_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = "Velocitron Manifesto",
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            // Portrait mode: original Column setup
+                            // Location zoom controls
+                            FloatingActionButton(
+                                onClick = {
+                                    onFetchLastLocation(true)
+                                    currentUserLocation.value?.let {
+                                        viewModel.centerMapOn(it)
+                                    }
+                                },
+                                containerColor = SlateCockpitSurface,
+                                contentColor = ElectricCyan,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.MyLocation,
+                                    contentDescription = "Center Location",
+                                    modifier = Modifier.size(22.dp)
                                 )
-                        ) {
-                            Icon(
-                                imageVector = when (syncStatus) {
-                                    "synced" -> Icons.Default.CloudDone
-                                    "syncing" -> Icons.Default.Sync
-                                    "failed" -> Icons.Default.CloudQueue
-                                    else -> Icons.Default.Cloud
+                            }
+
+                            // Drawing toggle modes
+                            FloatingActionButton(
+                                onClick = {
+                                    viewModel.toggleDrawingMode()
                                 },
-                                contentDescription = "Cloud Storage Sync",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
+                                containerColor = if (isDrawingMode) CockpitOrange else SlateCockpitSurface,
+                                contentColor = if (isDrawingMode) DeepDarkBackground else CockpitOrange,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isDrawingMode) Icons.Default.Map else Icons.Default.Gesture,
+                                    contentDescription = "Manual Drawing mode",
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
 
-                        // Telemetry Dashboard Cockpit Button
-                        FloatingActionButton(
-                            onClick = {
-                                showTelemetryPage = true
-                            },
-                            containerColor = SlateCockpitSurface,
-                            contentColor = NeonPink,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.size(48.dp).testTag("telemetry_cockpit_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.BarChart,
-                                contentDescription = "Telemetry Cockpit Dashboard",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        // Map Theme Toggle Button (Dark, Light, Terrain)
-                        FloatingActionButton(
-                            onClick = {
-                                viewModel.toggleMapTheme()
-                            },
-                            containerColor = when (mapStyle) {
-                                "light" -> Color(0xFFFFD166)
-                                "terrain" -> NeonGreen.copy(alpha = 0.2f)
-                                else -> SlateCockpitSurface
-                            },
-                            contentColor = when (mapStyle) {
-                                "light" -> DeepDarkBackground
-                                "terrain" -> NeonGreen
-                                else -> Color.White
-                            },
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Icon(
-                                imageVector = when (mapStyle) {
-                                    "light" -> Icons.Default.LightMode
-                                    "terrain" -> Icons.Default.Terrain
-                                    else -> Icons.Default.DarkMode
+                            // Saved routes list controller drawer button
+                            FloatingActionButton(
+                                onClick = {
+                                    isSheetExpanded = !isSheetExpanded
                                 },
-                                contentDescription = "Toggle Map Theme: Dark, Light, Terrain",
-                                modifier = Modifier.size(22.dp)
-                            )
+                                containerColor = if (isSheetExpanded) ElectricCyan else SlateCockpitSurface,
+                                contentColor = if (isSheetExpanded) DeepDarkBackground else ElectricCyan,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isSheetExpanded) Icons.Default.Book else Icons.Default.History,
+                                    contentDescription = "Ride Journal Panel",
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            // Cloud Sync settings button
+                            FloatingActionButton(
+                                onClick = {
+                                    showSyncDialog = true
+                                },
+                                containerColor = when (syncStatus) {
+                                    "synced" -> NeonGreen.copy(alpha = 0.15f)
+                                    "syncing" -> ElectricCyan.copy(alpha = 0.15f)
+                                    "failed" -> NeonPink.copy(alpha = 0.15f)
+                                    else -> SlateCockpitSurface
+                                },
+                                contentColor = when (syncStatus) {
+                                    "synced" -> NeonGreen
+                                    "syncing" -> ElectricCyan
+                                    "failed" -> NeonPink
+                                    else -> Color.White
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(48.dp)
+                                    .border(
+                                        1.dp,
+                                        when (syncStatus) {
+                                            "synced" -> NeonGreen.copy(alpha = 0.5f)
+                                            "syncing" -> ElectricCyan.copy(alpha = 0.5f)
+                                            "failed" -> NeonPink.copy(alpha = 0.5f)
+                                            else -> Color.Transparent
+                                        },
+                                        RoundedCornerShape(16.dp)
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = when (syncStatus) {
+                                        "synced" -> Icons.Default.CloudDone
+                                        "syncing" -> Icons.Default.Sync
+                                        "failed" -> Icons.Default.CloudQueue
+                                        else -> Icons.Default.Cloud
+                                    },
+                                    contentDescription = "Cloud Storage Sync",
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            // Telemetry Dashboard Cockpit Button
+                            FloatingActionButton(
+                                onClick = {
+                                    showTelemetryPage = true
+                                },
+                                containerColor = SlateCockpitSurface,
+                                contentColor = NeonPink,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(48.dp).testTag("telemetry_cockpit_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BarChart,
+                                    contentDescription = "Telemetry Cockpit Dashboard",
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Map Theme Toggle Button (Dark, Light, Terrain)
+                            FloatingActionButton(
+                                onClick = {
+                                    viewModel.toggleMapTheme()
+                                },
+                                containerColor = when (mapStyle) {
+                                    "light" -> Color(0xFFFFD166)
+                                    "terrain" -> NeonGreen.copy(alpha = 0.2f)
+                                    else -> SlateCockpitSurface
+                                },
+                                contentColor = when (mapStyle) {
+                                    "light" -> DeepDarkBackground
+                                    "terrain" -> NeonGreen
+                                    else -> Color.White
+                                },
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = when (mapStyle) {
+                                        "light" -> Icons.Default.LightMode
+                                        "terrain" -> Icons.Default.Terrain
+                                        else -> Icons.Default.DarkMode
+                                    },
+                                    contentDescription = "Toggle Map Theme: Dark, Light, Terrain",
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Velocitron Manifesto/About Button
+                            FloatingActionButton(
+                                onClick = {
+                                    showAboutPage = true
+                                },
+                                containerColor = SlateCockpitSurface,
+                                contentColor = ElectricCyan,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.size(48.dp).testTag("about_cockpit_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "Velocitron Manifesto",
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(6.dp))
                         }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        // Velocitron Manifesto/About Button
-                        FloatingActionButton(
-                            onClick = {
-                                showAboutPage = true
-                            },
-                            containerColor = SlateCockpitSurface,
-                            contentColor = ElectricCyan,
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.size(48.dp).testTag("about_cockpit_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = "Velocitron Manifesto",
-                                modifier = Modifier.size(22.dp)
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(6.dp))
                     } // End if (!isTracking)
 
                     // Start GPS ride tracking command button
@@ -2378,6 +2557,107 @@ fun RoadTrackerApp(
 
                             Text(
                                 text = telemetryDescription,
+                                fontSize = 10.5.sp,
+                                color = TextSilver,
+                                lineHeight = 14.sp,
+                                modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                            )
+                        }
+
+                        Divider(color = GeometricBorder, thickness = 1.dp, modifier = Modifier.padding(vertical = 4.dp))
+
+                        // --- SECTION 3: BACKGROUND STABILITY (BATTERY OPTIMIZATION) ---
+                        Column(modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                            val context = LocalContext.current
+                            val powerManager = remember(context) { context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager }
+                            val isBatteryUnrestricted = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                                powerManager.isIgnoringBatteryOptimizations(context.packageName)
+                            } else {
+                                true
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                    Icon(
+                                        imageVector = Icons.Default.Power,
+                                        contentDescription = "Battery Config Icon",
+                                        tint = if (isBatteryUnrestricted) NeonGreen else CockpitOrange,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "BACKGROUND GPS STABILITY",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val intent = Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            try {
+                                                val intent = Intent(android.provider.Settings.ACTION_SETTINGS)
+                                                context.startActivity(intent)
+                                            } catch (ex: Exception) {
+                                                ex.printStackTrace()
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isBatteryUnrestricted) SlateCockpitSurface else NeonPink.copy(alpha = 0.2f),
+                                        contentColor = if (isBatteryUnrestricted) ElectricCyan else NeonPink
+                                    ),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(28.dp)
+                                ) {
+                                    Text(
+                                        text = "SYS CONFIG",
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (isBatteryUnrestricted) "UNRESTRICTED • SECURE" else "RESTRICTED BY SYSTEM (RECOMMENDED: CHANGE)",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isBatteryUnrestricted) NeonGreen else CockpitOrange,
+                                    letterSpacing = 0.5.sp,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = if (isBatteryUnrestricted) "SAFE" else "THROTTLED",
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isBatteryUnrestricted) NeonGreen else CockpitOrange
+                                )
+                            }
+
+                            val batteryStabilityDescription = if (isBatteryUnrestricted) {
+                                "Unrestricted • System will not freeze the CPU or limit GPS sensor logs when screen is closed."
+                            } else {
+                                "Optimized • System puts the GPS updater to sleep when you turn off the screen. Fix by clicking 'SYS CONFIG' -> 'All apps' -> RoadTracker -> change to 'Unrestricted'."
+                            }
+
+                            Text(
+                                text = batteryStabilityDescription,
                                 fontSize = 10.5.sp,
                                 color = TextSilver,
                                 lineHeight = 14.sp,

@@ -39,6 +39,9 @@ fun AboutCockpitPage(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
     var activeTabIndex by remember { mutableStateOf(0) } // 0: Features, 1: Specs, 2: Safety & Terms, 3: Diagnostics
     var liveGlowVal by remember { mutableStateOf(1.0f) }
 
@@ -121,21 +124,21 @@ fun AboutCockpitPage(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(24.dp))
+                    .clip(RoundedCornerShape(if (isLandscape) 16.dp else 24.dp))
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(SlateCockpitSurface, DeepDarkBackground)
                         )
                     )
-                    .border(1.dp, GeometricBorder, RoundedCornerShape(24.dp))
-                    .padding(24.dp),
+                    .border(1.dp, GeometricBorder, RoundedCornerShape(if (isLandscape) 16.dp else 24.dp))
+                    .padding(if (isLandscape) 12.dp else 24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     // Logo representation
                     Box(
                         modifier = Modifier
-                            .size(72.dp)
+                            .size(if (isLandscape) 48.dp else 72.dp)
                             .clip(CircleShape)
                             .background(ElectricCyan.copy(alpha = 0.15f))
                             .border(2.dp, ElectricCyan, CircleShape),
@@ -145,15 +148,15 @@ fun AboutCockpitPage(
                             imageVector = Icons.Default.SportsMotorsports,
                             contentDescription = "Superbike Helmet",
                             tint = ElectricCyan,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(if (isLandscape) 24.dp else 36.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(if (isLandscape) 8.dp else 16.dp))
 
                     Text(
                         text = "VELOCITRON",
-                        fontSize = 28.sp,
+                        fontSize = if (isLandscape) 20.sp else 28.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color.White,
                         letterSpacing = 4.sp,
@@ -603,7 +606,7 @@ fun AboutCockpitPage(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(300.dp)
+                                .height(if (isLandscape) 150.dp else 300.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(Color.Black)
                                 .border(1.dp, GeometricBorder, RoundedCornerShape(12.dp))
